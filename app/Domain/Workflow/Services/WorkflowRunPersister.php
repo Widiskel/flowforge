@@ -43,7 +43,7 @@ class WorkflowRunPersister
                     'step_id' => $stepId,
                     'step_type' => $step['type'],
                     'status' => $stepResult->status->value,
-                    'attempt_count' => 1,
+                    'attempt_count' => $stepResult->attemptCount ?? 1,
                     'max_attempts' => $step['retry']['maxAttempts'] ?? 1,
                     'started_at' => $now,
                     'finished_at' => $now,

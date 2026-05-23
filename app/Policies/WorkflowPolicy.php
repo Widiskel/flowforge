@@ -46,4 +46,9 @@ class WorkflowPolicy
     {
         return $this->ownsTenant($user, $workflow) && $user->hasRole('admin', 'editor');
     }
+
+    public function trigger(User $user, Workflow $workflow): bool
+    {
+        return $this->ownsTenant($user, $workflow) && $user->hasRole('admin', 'editor');
+    }
 }

@@ -12,5 +12,6 @@ readonly class StepResult
         public StepRunStatus $status,
         public array $output = [],
         public ?string $error = null,
+        public int $attemptCount = 1,
     ) {}
 }

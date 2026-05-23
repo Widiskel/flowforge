@@ -21,7 +21,7 @@ class WorkflowRunController extends Controller
             ->where('tenant_id', $request->user()->tenant_id)
             ->findOrFail($workflow);
 
-        $this->authorize('rollback', $model); // editor/admin can trigger
+        $this->authorize('trigger', $model);
 
         $validated = $request->validate([
             'input' => ['nullable', 'array'],
