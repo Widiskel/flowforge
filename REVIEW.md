@@ -55,3 +55,22 @@ Tindak lanjut:
 Verifikasi setelah fix: 50 tests pass (138 assertions), pint pass.
 
 Putusan: OK merge.
+
+## PR #4 — feat(trigger): manual workflow run execution
+
+- Branch: `feature/workflow-triggers`
+- PR: https://github.com/Widiskel/flowforge/pull/4
+- Status: merged
+
+Catatan review:
+- `WorkflowRunController::trigger` sebelumnya pakai ability `rollback`. Intent-nya salah, sebaiknya punya ability sendiri.
+- `WorkflowRunPersister` selalu persist `attempt_count = 1`. Padahal executor support retry, jadi attempt count harus di-carry dari executor ke persister.
+
+Tindak lanjut:
+- Trigger sekarang pakai ability `trigger` di `WorkflowPolicy`.
+- `WorkflowExecutor` return `StepResult` dengan `attemptCount` yang benar.
+- `WorkflowRunPersister` persist `attempt_count` dari `StepResult`.
+
+Verifikasi setelah fix: 54 tests pass (149 assertions), pint pass.
+
+Putusan: OK merge.
