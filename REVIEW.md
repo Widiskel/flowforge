@@ -209,3 +209,24 @@ Tindak lanjut:
 Verifikasi setelah fix: 82 tests pass (246 assertions), pint pass, typecheck hijau, build sukses.
 
 Putusan: OK merge.
+
+## PR #12 — docs: submission polish (README, REVIEW.md, CHECKPOINTS)
+
+- Branch: `feature/submission-polish`
+- PR: https://github.com/Widiskel/flowforge/pull/12
+- Status: merged
+
+Catatan review:
+- README sekarang berisi setup (Docker + local), demo accounts, architecture overview, API summary, testing commands, trade-offs, dan future improvements.
+- REVIEW.md sudah lengkap dengan 12 PR entries (PR #1–#12), tone konsisten ngobrol, severity grading rata.
+- CHECKPOINTS.md sudah diupdate: Phase 9–17 status diupdate sesuai progress.
+- Demo accounts table ditambahkan di README untuk RBAC demonstration.
+
+Tindak lanjut:
+- EXPLAIN query optimization capture bisa ditambah nanti kalau ada bottleneck.
+- Demo workflow seed (Incident Notifier) bisa ditambah di seeder.
+- Submission email content (lokal di `docs/submission/`) perlu diisi sebelum push ke remote.
+
+Verifikasi setelah fix: 82 tests pass (246 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
