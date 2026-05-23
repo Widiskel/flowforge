@@ -230,3 +230,25 @@ Tindak lanjut:
 Verifikasi setelah fix: 82 tests pass (246 assertions), pint pass, typecheck hijau, build sukses.
 
 Putusan: OK merge.
+
+## PR #13 — feat(deployment): add Helm chart skeleton
+
+- Branch: `feature/deployment-skeleton`
+- PR: https://github.com/Widiskel/flowforge/pull/13
+- Status: merged
+
+Catatan review:
+- Helm chart sudah zero-downtime ready: liveness probe `/up`, readiness probe `/api/healthz/ready`.
+- Secrets template pakai `stringData` supaya plain text di values, Helm handle encoding.
+- HPA resource limits sudah disiapkan di values.yaml.
+- Chart.yaml version `0.1.0` (early alpha), appVersion `1.0.0`.
+
+Tindak lanjut:
+- Secrets template ditambahkan untuk `APP_KEY`, `JWT_SECRET`, dan kredensial DB.
+- values.yaml diperluas dengan blok `secrets` agar konfigurasi sensitif punya satu tempat injection yang jelas.
+- Probe path konsisten dengan endpoint operasional yang sudah ada (`/up`, `/api/healthz/ready`).
+- README chart menjelaskan installation, configuration, dan production notes.
+
+Verifikasi setelah fix: helm lint pass.
+
+Putusan: OK merge.
