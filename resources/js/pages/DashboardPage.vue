@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { MarkerType, VueFlow, type Edge, type Node } from '@vue-flow/core'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, analyzeFailure, connectRunStream as apiConnectRunStream, healthMetrics as fetchHealthMetrics, runLogs, workflowRun, workflowRuns, workflows as fetchWorkflows } from '../services/api/client'
+import WorkflowBuilder from '../components/WorkflowBuilder.vue'
+import { ApiError, analyzeFailure, connectRunStream as apiConnectRunStream, createWorkflow, healthMetrics as fetchHealthMetrics, runLogs, workflowRun, workflowRuns, workflows as fetchWorkflows } from '../services/api/client'
 import { useAuthStore } from '../stores/auth'
-import type { ExecutionLog, HealthMetrics, Workflow, WorkflowRun, WorkflowStepDefinition, AiFailureAnalysis } from '../types/api'
+import type { ExecutionLog, HealthMetrics, Workflow, WorkflowRun, WorkflowStepDefinition, AiFailureAnalysis, WorkflowDefinition } from '../types/api'
 
 const auth = useAuthStore()
 
@@ -20,6 +21,11 @@ const error = ref<string | null>(null)
 const streamState = ref<'idle' | 'connecting' | 'live' | 'closed' | 'error'>('idle')
 const analyzingFailure = ref(false)
 const failureAnalysis = ref<AiFailureAnalysis | null>(null)
+const showBuilder = ref(false)
+const builderName = ref('')
+const builderDescription = ref('')
+const builderDefinition = ref<WorkflowDefinition>({ schemaVersion: 1, name: '', globalTimeoutMs: 60000, steps: [] })
+const saving = ref(false)
 let eventSource: EventSource | null = null
 
 const activeSteps = computed(() => selectedWorkflow.value?.currentVersion?.definition.steps ?? [])
@@ -276,6 +282,54 @@ function formatDuration(value?: number | null): string {
 function statusClass(status?: string): string {
     return `status-${(status ?? 'pending').toLowerCase()}`
 }
+
+function openBuilder(): void {
+    showBuilder.value = true
+    builderName.value = ''
+    builderDescription.value = ''
+    builderDefinition.value = {
+        schemaVersion: 1,
+        name: '',
+        globalTimeoutMs: 60000,
+        steps: [],
+    }
+}
+
+function closeBuilder(): void {
+    showBuilder.value = false
+}
+
+async function saveWorkflow(): Promise<void> {
+    if (!auth.canTrigger) {
+        error.value = 'Role ini tidak boleh membuat workflow.'
+        return
+    }
+
+    saving.value = true
+    error.value = null
+
+    try {
+        const payload = {
+            name: builderName.value,
+            description: builderDescription.value || null,
+            status: 'active',
+            change_summary: 'Created from visual workflow builder.',
+            definition: {
+                ...builderDefinition.value,
+                name: builderName.value,
+            },
+        }
+
+        const workflow = await createWorkflow(payload)
+        showBuilder.value = false
+        await loadWorkflows()
+        await selectWorkflow(workflow)
+    } catch (exception) {
+        error.value = exception instanceof Error ? exception.message : 'Failed to create workflow.'
+    } finally {
+        saving.value = false
+    }
+}
 </script>
 
 <template>
@@ -290,6 +344,15 @@ function statusClass(status?: string): string {
                     Refresh
                 </button>
             </div>
+
+            <button
+                v-if="auth.canTrigger"
+                type="button"
+                class="primary-button create-workflow-btn"
+                @click="openBuilder"
+            >
+                + New workflow
+            </button>
 
             <p v-if="error" class="error-banner">
                 {{ error }}
@@ -474,5 +537,31 @@ function statusClass(status?: string): string {
                 </button>
             </div>
         </section>
+
+        <aside v-if="showBuilder" class="builder-overlay">
+            <div class="builder-overlay__backdrop" @click="closeBuilder" />
+            <div class="builder-overlay__panel">
+                <div class="builder-overlay__header">
+                    <h3>Create workflow</h3>
+                    <button type="button" class="ghost-button compact" @click="closeBuilder">✕</button>
+                </div>
+                <WorkflowBuilder
+                    v-model="builderDefinition"
+                    v-model:name="builderName"
+                    v-model:description="builderDescription"
+                />
+                <div class="builder-overlay__actions">
+                    <button type="button" class="ghost-button" @click="closeBuilder">Cancel</button>
+                    <button
+                        type="button"
+                        class="primary-button"
+                        :disabled="saving || builderDefinition.steps.length === 0"
+                        @click="saveWorkflow"
+                    >
+                        {{ saving ? 'Creating…' : 'Create workflow' }}
+                    </button>
+                </div>
+            </div>
+        </aside>
     </section>
 </template>
