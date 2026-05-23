@@ -7,9 +7,7 @@ namespace App\Domain\Auth;
 use App\Models\JwtRefreshToken;
 use App\Models\User;
 use Carbon\CarbonImmutable;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 
 class JwtRefreshTokenStore
 {
@@ -40,26 +38,6 @@ class JwtRefreshTokenStore
         $record->forceFill(['last_used_at' => now()])->save();
 
         return $record;
-    }
-
-    public function rotate(string $plainToken): array
-    {
-        return DB::transaction(function () use ($plainToken): array {
-            $current = $this->findUsable($plainToken);
-
-            if ($current === null) {
-                throw new RuntimeException('Refresh token is invalid, revoked, or expired.');
-            }
-
-            [$nextPlainToken, $nextRecord] = $this->issue($current->user);
-
-            $current->forceFill([
-                'revoked_at' => now(),
-                'replaced_by_id' => $nextRecord->getKey(),
-            ])->save();
-
-            return [$nextPlainToken, $nextRecord, $current->user];
-        });
     }
 
     public function revoke(string $plainToken): void
