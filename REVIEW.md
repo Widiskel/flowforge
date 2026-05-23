@@ -130,6 +130,23 @@ Tindak lanjut:
 - Kalau nanti mau pakai provider AI beneran, contract analyzer-nya sudah bisa dipisah dari `MockFailureAnalyzer` jadi driver/provider-based.
 - Bisa tambah snapshot sanitized context ke UI reviewer/dev mode kalau butuh observability internal, tapi jangan tampilkan di surface end-user.
 
-Verifikasi setelah fix: 74 tests pass (205 assertions), AI feature test 9 pass (24 assertions), pint pass, typecheck hijau, build sukses.
+Putusan: OK merge.
+
+## PR #8 — feat(probes): operational health probes
+
+- Branch: `feature/operational-probes`
+- PR: https://github.com/Widiskel/flowforge/pull/8
+- Status: merged
+
+Catatan review:
+- `/up` sudah disediakan oleh Laravel built-in lewat `withRouting(health: '/up')`. Untuk K8s yang butuh readiness/startup terpisah dari liveness, perlu probe yang benar-benar verifikasi backing service (DB, cache, migrasi).
+- Probe operasional tidak boleh tenant-scoped atau di belakang `auth:api`. Awalnya saat draft sempat masuk ke group middleware; sekarang sudah dipindah keluar supaya bisa dipanggil oleh kubelet/load balancer tanpa kredensial.
+- Bentuk response untuk `/actuator/health` mengikuti konvensi Spring Boot (`UP/DOWN`, components map) supaya tooling monitoring umum bisa parse tanpa adapter khusus.
+
+Tindak lanjut:
+- `OperationalHealthService` cek DB lewat `DB::select('SELECT 1')`, cache lewat write/read/forget, dan migrasi lewat `pendingMigrations()`. Worker exec probe (`queue:health`) ditunda ke phase Docker Compose karena lebih cocok di image worker, bukan di app HTTP.
+- Probe gagal akan return HTTP 503 dengan body yang tetap memberi detail check, jadi observability stack masih bisa baca alasan degraded tanpa harus tail log.
+
+Verifikasi setelah fix: 79 tests pass (230 assertions), pint pass, typecheck hijau, build sukses.
 
 Putusan: OK merge.
