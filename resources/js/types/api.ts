@@ -34,6 +34,7 @@ export type WorkflowStepDefinition = {
     dependsOn?: string[]
     timeoutMs?: number
     config?: Record<string, unknown>
+    retry?: { maxAttempts?: number }
 }
 
 export type WorkflowDefinition = {
@@ -87,6 +88,8 @@ export type StepRun = {
     startedAt?: string | null
     finishedAt?: string | null
     durationMs?: number | null
+    output?: unknown
+    errorMessage?: string | null
 }
 
 export type WorkflowRun = {
@@ -103,14 +106,16 @@ export type WorkflowRun = {
     createdAt?: string
     updatedAt?: string
     stepRuns?: StepRun[]
+    logs?: ExecutionLog[]
 }
 
 export type ExecutionLog = {
     id: string
+    workflowStepRunId?: string | null
     level: 'debug' | 'info' | 'warning' | 'error' | string
     event: string
     message: string
-    context?: Record<string, unknown>
+    context?: Record<string, unknown> | null
     createdAt?: string
 }
 
@@ -144,6 +149,89 @@ export type HealthMetrics = {
     }
     averageDurationMs: number | null
     p95DurationMs: number | null
+}
+
+export type RawHealthMetrics = {
+    window: 'last_24h'
+    generated_at: string
+    active_runs: number
+    totals: {
+        runs: number
+        success: number
+        failed: number
+        timeout: number
+    }
+    rates: {
+        success: number
+        failure: number
+        timeout: number
+    }
+    average_duration_ms: number | null
+    p95_duration_ms: number | null
+}
+
+export type RawWorkflow = {
+    id: string
+    tenant_id: string
+    created_by: number | string
+    name: string
+    description: string | null
+    status: WorkflowStatus
+    current_version: RawWorkflowVersion | null
+    created_at?: string
+    updated_at?: string
+}
+
+export type RawWorkflowVersion = {
+    id: string
+    version_number: number
+    definition: WorkflowDefinition
+    source: string
+    change_summary?: string | null
+    rolled_back_from_version_id?: string | null
+    created_at?: string
+}
+
+export type RawStepRun = {
+    id: string
+    step_id: string
+    step_type: string
+    status: RunStatus
+    attempt_count: number
+    max_attempts: number
+    started_at?: string | null
+    finished_at?: string | null
+    duration_ms?: number | null
+    output?: unknown
+    error_message?: string | null
+}
+
+export type RawWorkflowRun = {
+    id: string
+    workflow_id: string
+    workflow_version_id: string
+    workflow_trigger_id?: string | null
+    status: RunStatus
+    input?: Record<string, unknown>
+    timeout_ms?: number
+    started_at?: string | null
+    finished_at?: string | null
+    duration_ms?: number | null
+    created_at?: string
+    updated_at?: string
+    created_by?: number | string
+    step_runs?: RawStepRun[]
+    logs?: RawExecutionLog[]
+}
+
+export type RawExecutionLog = {
+    id: string
+    workflow_step_run_id?: string | null
+    level: string
+    event: string
+    message: string
+    context?: Record<string, unknown> | null
+    created_at?: string
 }
 
 export type AuthTokenPair = {

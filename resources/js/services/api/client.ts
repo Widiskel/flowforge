@@ -8,6 +8,11 @@ import type {
     HealthMetrics,
     ExecutionLog,
     AiFailureAnalysis,
+    RawHealthMetrics,
+    RawWorkflowRun,
+    RawExecutionLog,
+    RawStepRun,
+    StepRun,
 } from '@/types/api'
 
 export class ApiError extends Error {
@@ -110,17 +115,29 @@ export async function workflows(): Promise<ApiCollection<Workflow>> {
 }
 
 export async function workflowRuns(workflowId: string): Promise<ApiCollection<WorkflowRun>> {
-    return request<ApiCollection<WorkflowRun>>(`/api/workflows/${workflowId}/runs`)
+    const response = await request<{ data: RawWorkflowRun[] }>(`/api/workflow-runs?workflow_id=${encodeURIComponent(workflowId)}`)
+    return {
+        ...response,
+        data: response.data.map(rawToWorkflowRun),
+    }
+}
+
+export async function workflowRun(runId: string): Promise<WorkflowRun> {
+    const response = await request<{ data: RawWorkflowRun }>(`/api/workflow-runs/${runId}`)
+    return rawToWorkflowRun(response.data)
 }
 
 export async function healthMetrics(): Promise<HealthMetrics> {
-    const response = await request<ApiItem<HealthMetrics>>('/api/health/metrics?window=last_24h')
-
-    return response.data
+    const response = await request<{ data: RawHealthMetrics }>(`/api/health/metrics?window=last_24h`)
+    return rawToHealthMetrics(response.data)
 }
 
-export async function runLogs(workflowId: string, runId: string): Promise<ApiCollection<ExecutionLog>> {
-    return request<ApiCollection<ExecutionLog>>(`/api/workflows/${workflowId}/runs/${runId}/logs`)
+export async function runLogs(runId: string): Promise<ApiCollection<ExecutionLog>> {
+    const response = await request<{ data: RawExecutionLog[] }>(`/api/workflow-runs/${runId}/logs`)
+    return {
+        ...response,
+        data: response.data.map(rawToExecutionLog),
+    }
 }
 
 export async function analyzeFailure(workflowId: string, runId: string): Promise<AiFailureAnalysis> {
@@ -129,4 +146,101 @@ export async function analyzeFailure(workflowId: string, runId: string): Promise
     })
 
     return response.data
+}
+
+export function connectRunStream(runId: string, onSnapshot: (run: WorkflowRun) => void, onComplete: (status: string) => void): EventSource {
+    const eventSource = new EventSource(`/api/workflow-runs/${runId}/events?max_ticks=60&interval_ms=1000`, {
+        withCredentials: true,
+    })
+
+    eventSource.addEventListener('open', () => {
+        // Stream opened
+    })
+
+    eventSource.addEventListener('run.snapshot', (event) => {
+        const payload = JSON.parse((event as MessageEvent).data) as RawWorkflowRun
+        onSnapshot(rawToWorkflowRun(payload))
+    })
+
+    eventSource.addEventListener('run.completed', (event) => {
+        onComplete((event as MessageEvent).data)
+    })
+
+    eventSource.addEventListener('heartbeat', () => {
+        // Heartbeat received
+    })
+
+    eventSource.addEventListener('error', () => {
+        eventSource.close()
+    })
+
+    return eventSource
+}
+
+function rawToWorkflowRun(raw: RawWorkflowRun): WorkflowRun {
+    return {
+        id: raw.id,
+        workflowId: raw.workflow_id,
+        workflowVersionId: raw.workflow_version_id,
+        workflowTriggerId: raw.workflow_trigger_id ?? undefined,
+        status: raw.status,
+        input: raw.input ?? undefined,
+        timeoutMs: raw.timeout_ms ?? undefined,
+        startedAt: raw.started_at ?? undefined,
+        finishedAt: raw.finished_at ?? undefined,
+        durationMs: raw.duration_ms ?? undefined,
+        createdAt: raw.created_at ?? undefined,
+        updatedAt: raw.updated_at ?? undefined,
+        stepRuns: raw.step_runs?.map(rawToStepRun) ?? undefined,
+        logs: raw.logs?.map(rawToExecutionLog) ?? undefined,
+    }
+}
+
+function rawToStepRun(raw: RawStepRun): StepRun {
+    return {
+        id: raw.id,
+        stepId: raw.step_id,
+        stepType: raw.step_type,
+        status: raw.status,
+        attemptCount: raw.attempt_count,
+        maxAttempts: raw.max_attempts,
+        startedAt: raw.started_at ?? undefined,
+        finishedAt: raw.finished_at ?? undefined,
+        durationMs: raw.duration_ms ?? undefined,
+        output: raw.output,
+        errorMessage: raw.error_message ?? undefined,
+    }
+}
+
+function rawToExecutionLog(raw: RawExecutionLog): ExecutionLog {
+    return {
+        id: raw.id,
+        workflowStepRunId: raw.workflow_step_run_id ?? undefined,
+        level: raw.level,
+        event: raw.event,
+        message: raw.message,
+        context: raw.context ?? undefined,
+        createdAt: raw.created_at ?? undefined,
+    }
+}
+
+function rawToHealthMetrics(raw: RawHealthMetrics): HealthMetrics {
+    return {
+        window: raw.window,
+        generatedAt: raw.generated_at,
+        activeRuns: raw.active_runs,
+        totals: {
+            runs: raw.totals.runs,
+            success: raw.totals.success,
+            failed: raw.totals.failed,
+            timeout: raw.totals.timeout,
+        },
+        rates: {
+            success: raw.rates.success,
+            failure: raw.rates.failure,
+            timeout: raw.rates.timeout,
+        },
+        averageDurationMs: raw.average_duration_ms,
+        p95DurationMs: raw.p95_duration_ms,
+    }
 }
