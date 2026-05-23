@@ -21,6 +21,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use PHPOpenSourceSaver\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
@@ -70,8 +71,8 @@ class AuthController extends Controller
 
         try {
             Auth::guard('api')->logout();
-        } catch (\Throwable) {
-            // Already-blacklisted access tokens raise; safe to ignore on logout.
+        } catch (JWTException) {
+            // Already-blacklisted or missing access tokens are safe to ignore on logout.
         }
 
         return response()->json(['message' => 'Logged out.'], Response::HTTP_OK);
