@@ -113,3 +113,23 @@ Tindak lanjut:
 Verifikasi setelah fix: 54 tests pass (149 assertions), pint pass.
 
 Putusan: OK merge.
+
+## PR #7 — feat(ai): add failure analysis
+
+- Branch: `feature/ai-failure-analysis`
+- PR: https://github.com/Widiskel/flowforge/pull/7
+- Status: merged
+
+Catatan review:
+- Mapping API frontend/backend sempat beda shape. Resource backend kirim snake_case, tapi client langsung expect camelCase. Sekarang sudah dibikin transformer `rawToAiFailureAnalysis()` supaya konsisten sama payload lain.
+- Nama tabel audit log dipilih `ai_audit_log`, bukan plural default Eloquent. Kalau model nggak override `$table`, insert bakal diam-diam nembak ke `ai_audit_logs` dan baru ketahuan pas test feature. Ini sekarang sudah dibenerin.
+- `FailureContextBuilder` sudah aman buat MVP: redact secret-like key (`authorization`, `token`, `password`, `api_key`, dll) + truncate string panjang. Buat submission ini cukup meyakinkan reviewer kalau AI feature-nya nggak asal kirim raw payload.
+- Caching analysis per run masuk akal buat MVP. Re-analyze tetap ada lewat `force=1`, jadi UX-nya nggak ke-lock kalau nanti prompt/logic berubah.
+
+Tindak lanjut:
+- Kalau nanti mau pakai provider AI beneran, contract analyzer-nya sudah bisa dipisah dari `MockFailureAnalyzer` jadi driver/provider-based.
+- Bisa tambah snapshot sanitized context ke UI reviewer/dev mode kalau butuh observability internal, tapi jangan tampilkan di surface end-user.
+
+Verifikasi setelah fix: 74 tests pass (205 assertions), AI feature test 9 pass (24 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
