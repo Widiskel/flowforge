@@ -150,3 +150,62 @@ Tindak lanjut:
 Verifikasi setelah fix: 79 tests pass (230 assertions), pint pass, typecheck hijau, build sukses.
 
 Putusan: OK merge.
+
+## PR #9 — ci: add GitHub Actions workflow
+
+- Branch: `feature/ci-pipeline`
+- PR: https://github.com/Widiskel/flowforge/pull/9
+- Status: merged
+
+Catatan review:
+- CI job perlu setup environment yang cukup mirip local dev/testing: install dependencies, generate `APP_KEY`, dan isi `JWT_SECRET` sebelum test dijalankan.
+- Karena test suite pakai SQLite in-memory, CI tidak perlu service database eksternal untuk baseline pipeline.
+- Pint di CI lebih aman pakai mode `--test`, supaya job fail saat format melenceng dan tidak diam-diam mengubah file.
+
+Tindak lanjut:
+- Workflow menyiapkan `.env` dari `.env.example`, generate `APP_KEY` dan `JWT_SECRET` sebelum test.
+- PHP setup ditahan di baseline stabil (`8.4`) dengan extension SQLite yang dibutuhkan test.
+- Job menjalankan `./vendor/bin/pint --test`, `npm run typecheck`, `npm run build`, dan `php artisan test`.
+
+Verifikasi setelah fix: 79 tests pass (230 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
+
+## PR #10 — feat(docker): add Docker Compose stack
+
+- Branch: `feature/docker-compose`
+- PR: https://github.com/Widiskel/flowforge/pull/10
+- Status: merged
+
+Catatan review:
+- Multi-stage Dockerfile: frontend build di Node Alpine, production image di PHP-FPM Alpine. Composer install pakai `--no-dev --no-scripts` supaya image production tidak bawa dev dependencies.
+- Docker Compose topology: nginx (reverse proxy) → app (PHP-FPM) → postgres + redis. Worker dan scheduler pakai image yang sama tapi command berbeda.
+- Health check di Compose level: postgres pakai `pg_isready`, redis pakai `redis-cli ping`, app pakai `php artisan up`. Service dependency pakai `condition: service_healthy`.
+- `.dockerignore` exclude `node_modules/`, `vendor/`, `public/build/`, `tests/`, `docs/`, `.env*` supaya build context ringan.
+
+Tindak lanjut:
+- Nginx config perlu `proxy_buffering off` dan `X-Accel-Buffering: no` header kalau SSE mau jalan lewat nginx reverse proxy.
+- Worker probe (`queue:health`) bisa ditambah nanti kalau butuh readiness check khusus worker container.
+
+Verifikasi setelah fix: 79 tests pass (230 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
+
+## PR #11 — feat(e2e): add end-to-end workflow test
+
+- Branch: `feature/end-to-end-test`
+- PR: https://github.com/Widiskel/flowforge/pull/11
+- Status: merged
+
+Catatan review:
+- E2E test pakai `WorkflowRunPersister` yang sama dengan production path, bukan mock. Ini penting buat validasi end-to-end flow benar-benar jalan.
+- Test coverage: successful run, failed run dengan error message, dan cross-tenant access (404).
+- Test setup perlu workflow + current version sebelum trigger; helper method `makeWorkflowWithVersion()` abstraksi ini.
+
+Tindak lanjut:
+- Bisa tambah test untuk retry/backoff behavior kalau step handler support retry.
+- Bisa tambah test untuk global timeout enforcement.
+
+Verifikasi setelah fix: 82 tests pass (246 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
