@@ -138,6 +138,25 @@ class WorkflowCrudTest extends TestCase
         $response->assertStatus(422);
     }
 
+    public function test_create_workflow_rejects_dag_with_cycle(): void
+    {
+        $this->actingAsJwt($this->admin);
+
+        $cyclic = $this->validDefinition;
+        $cyclic['steps'] = [
+            ['id' => 'a', 'type' => 'SCRIPT', 'name' => 'A', 'dependsOn' => ['b'], 'config' => ['operation' => 'noop']],
+            ['id' => 'b', 'type' => 'SCRIPT', 'name' => 'B', 'dependsOn' => ['a'], 'config' => ['operation' => 'noop']],
+        ];
+
+        $response = $this->postJson('/api/workflows', [
+            'name' => 'Cyclic Workflow',
+            'definition' => $cyclic,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['definition']);
+    }
+
     // --- LIST ---
 
     public function test_list_workflows_returns_tenant_scoped(): void
