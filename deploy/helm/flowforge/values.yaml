@@ -1,0 +1,31 @@
+replicaCount: 2
+
+secrets:
+  appKey: base64:replace-me
+  jwtSecret: replace-me
+  dbUsername: flowforge
+  dbPassword: secret
+
+image:
+  repository: ghcr.io/widiskel/flowforge
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+ingress:
+  enabled: true
+  host: flowforge.example.com
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: flowforge
+description: Real-Time Multi-Tenant Workflow Orchestration Engine
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Widianto Eka Saputro
+    url: https://github.com/Widiskel
