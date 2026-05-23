@@ -37,3 +37,21 @@ Tindak lanjut:
 Verifikasi setelah fix: 35 tests pass (105 assertions), pint dan typecheck hijau, build sukses.
 
 Putusan: OK merge.
+
+## PR #3 — feat(engine): DAG validator, planner, executor
+
+- Branch: `feature/dag-validator-executor`
+- PR: https://github.com/Widiskel/flowforge/pull/3
+- Status: merged
+
+Catatan review:
+- `HttpStepHandler` catch `Throwable` terlalu lebar. Seharusnya catch `ConnectionException` aja supaya bug lain yang nggak terkait HTTP call nggak ke-mask.
+- `WorkflowExecutor::executeStepWithRetry` hard-cap delay 10s. Exponential backoff jadi nggak beneran exponential kalau cap-nya lebih kecil dari calculated delay. Mending pakai `maxDelayMs` dari config step.
+
+Tindak lanjut:
+- `HttpStepHandler` sekarang catch `ConnectionException`.
+- Retry delay sekarang pakai `maxDelayMs` dari config step, bukan hard-cap.
+
+Verifikasi setelah fix: 50 tests pass (138 assertions), pint pass.
+
+Putusan: OK merge.
