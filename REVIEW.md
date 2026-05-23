@@ -76,7 +76,26 @@ Verifikasi setelah fix: 60 tests pass (165+ assertions), pint pass, typecheck hi
 
 Putusan: OK merge.
 
-## PR #4 — feat(trigger): manual workflow run execution
+## PR #6 — feat(monitoring): add live run monitoring dashboard
+
+- Branch: `feature/sse-run-monitoring`
+- PR: https://github.com/Widiskel/flowforge/pull/6
+- Status: merged
+
+Catatan review:
+- SSE endpoint pakai DB polling tiap tick. MVP-friendly, tapi kalau run-nya banyak paralel + interval pendek, ini bakal jadi N×polling × jumlah connection. Untuk MVP cukup, tapi harus didokumentasikan sebagai upgrade path ke Redis pub/sub atau Laravel Reverb.
+- `RunEventStreamController` pakai `connection_aborted()` + `usleep`. Pastikan PHP-FPM `output_buffering = Off` atau client bakal nunggu sampai buffer flush. Heartbeat 15s + `X-Accel-Buffering: no` udah sesuai standar SSE behind nginx.
+- Frontend types layer (`RawWorkflowRun`, `RawExecutionLog`) sebenarnya boilerplate-y. Bisa dipikirin pakai automated transformer (camelcase-keys lib atau Laravel API resource yang serialize camelCase) supaya nggak duplicate definitions.
+- Health metrics endpoint hardcode `last_24h` window. Belum support custom range. Untuk MVP fine, tapi tambah validation `window` query param biar reviewer paham ini bukan dead param.
+- `connectRunStream` di dashboard pas trigger, di-skip handling-nya kalau response error. Optimistic run cleanup harus jalan walaupun SSE gagal connect.
+
+Tindak lanjut:
+- Dokumentasi production note di README: `output_buffering`, nginx `proxy_buffering off`, queue worker.
+- Tambah indeks di `execution_logs(workflow_run_id, created_at)` buat speed up `runLogs()` di production.
+
+Verifikasi setelah fix: 65 tests pass (181 assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
 
 - Branch: `feature/workflow-triggers`
 - PR: https://github.com/Widiskel/flowforge/pull/4
