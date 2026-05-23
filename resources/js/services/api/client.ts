@@ -122,6 +122,21 @@ export async function workflows(): Promise<ApiCollection<Workflow>> {
     }
 }
 
+export async function createWorkflow(payload: {
+    name: string
+    description?: string | null
+    status?: string
+    change_summary?: string
+    definition: unknown
+}): Promise<Workflow> {
+    const response = await request<{ data: RawWorkflow }>('/api/workflows', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    })
+
+    return rawToWorkflow(response.data)
+}
+
 export async function workflowRuns(workflowId: string): Promise<ApiCollection<WorkflowRun>> {
     const response = await request<{ data: RawWorkflowRun[] }>(`/api/workflow-runs?workflow_id=${encodeURIComponent(workflowId)}`)
     return {

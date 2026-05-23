@@ -252,3 +252,68 @@ Tindak lanjut:
 Verifikasi setelah fix: helm lint pass.
 
 Putusan: OK merge.
+
+## PR #14 — fix: repair workflow demo execution path
+
+- Branch: `bugfix/workflow-demo-and-sse`
+- PR: https://github.com/Widiskel/flowforge/pull/14
+- Status: merged
+
+Catatan review:
+- Demo workflow sebelumnya belum representatif untuk reviewer karena definition seed tidak valid terhadap contract engine (`step type`, `dependsOn`, `schemaVersion`) dan frontend tidak map `current_version` ke `currentVersion`, jadi node count/DAG kelihatan rusak walau backend sebenarnya ada.
+- SSE run stream juga belum benar untuk JWT karena EventSource tidak bisa kirim Authorization header.
+
+Tindak lanjut:
+- Seeder demo workflow sekarang pakai definition yang valid dan reproducible:
+  - `schemaVersion`
+  - `globalTimeoutMs`
+  - `dependsOn`
+  - uppercase step type (`HTTP`, `SCRIPT`, `DELAY`, `CONDITION`)
+- Frontend workflow transformer sudah benar:
+  - `current_version` → `currentVersion`
+  - `version_number` → `versionNumber`
+  - node count dan DAG renderer tidak 0 lagi
+- SSE auth dilewatkan via query string token karena EventSource tidak bisa kirim Authorization header
+- HTTP step demo tanpa URL sekarang fallback ke noop success supaya demo tidak gagal karena dependency eksternal
+
+Verifikasi setelah fix:
+- 82 tests pass (246 assertions)
+- typecheck pass
+- build pass
+- pint pass
+- demo trigger run SUCCESS end-to-end
+
+Putusan: OK merge.
+
+## PR #15 — feat(builder): add visual workflow builder UI
+
+- Branch: `feature/workflow-builder-ui`
+- PR: https://github.com/Widiskel/flowforge/pull/15
+- Status: pending
+
+Catatan review:
+- Workflow builder UI minimal yang usable oleh user non-teknis:
+  - Form create workflow (name, description, global timeout)
+  - Add/remove step
+  - Step type: HTTP / SCRIPT / DELAY / CONDITION
+  - dependsOn via checkbox
+  - config sederhana per type (operation, method/url, delay ms, expression)
+  - DAG preview langsung pakai Vue Flow
+- Backend API `POST /api/workflows` sudah ada dan berfungsi
+- Frontend `createWorkflow()` client function sudah terintegrasi
+- Overlay builder tidak mengganggu workflow library/selected panel
+
+Tindak lanjut:
+- Browser automation test untuk create workflow end-to-end
+- Validation error display di UI (sudah ada di component)
+- Success feedback setelah workflow created
+
+Verifikasi setelah fix:
+- 82 tests pass (246 assertions)
+- typecheck pass
+- build pass
+- pint pass
+- API create workflow verified via console POST (201 response)
+
+Putusan: OK merge.
+
