@@ -12,8 +12,14 @@ class HttpStepHandler implements StepHandler
 {
     public function handle(array $config, array $context): StepResult
     {
-        $method = strtolower($config['method'] ?? 'GET');
         $url = $config['url'] ?? '';
+
+        // Noop mode: no URL configured, simulate a successful HTTP call.
+        if ($url === '') {
+            return new StepResult(StepRunStatus::SUCCESS, ['operation' => 'noop', 'note' => 'No URL configured — simulated success.']);
+        }
+
+        $method = strtolower($config['method'] ?? 'GET');
         $timeout = (int) (($config['timeoutMs'] ?? 10000) / 1000);
         $headers = $config['headers'] ?? [];
 

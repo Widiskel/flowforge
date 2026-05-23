@@ -10,10 +10,13 @@ import type {
     AiFailureAnalysis,
     RawAiFailureAnalysis,
     RawHealthMetrics,
+    RawWorkflow,
     RawWorkflowRun,
+    RawWorkflowVersion,
     RawExecutionLog,
     RawStepRun,
     StepRun,
+    WorkflowVersion,
 } from '@/types/api'
 
 export class ApiError extends Error {
@@ -112,7 +115,11 @@ export async function currentUser(): Promise<AuthUser> {
 }
 
 export async function workflows(): Promise<ApiCollection<Workflow>> {
-    return request<ApiCollection<Workflow>>('/api/workflows')
+    const response = await request<{ data: RawWorkflow[] }>('/api/workflows')
+    return {
+        ...response,
+        data: response.data.map(rawToWorkflow),
+    }
 }
 
 export async function workflowRuns(workflowId: string): Promise<ApiCollection<WorkflowRun>> {
@@ -150,7 +157,18 @@ export async function analyzeFailure(runId: string): Promise<AiFailureAnalysis> 
 }
 
 export function connectRunStream(runId: string, onSnapshot: (run: WorkflowRun) => void, onComplete: (status: string) => void): EventSource {
-    const eventSource = new EventSource(`/api/workflow-runs/${runId}/events?max_ticks=60&interval_ms=1000`, {
+    const token = accessTokenProvider?.()
+    const params = new URLSearchParams({
+        max_ticks: '60',
+        interval_ms: '1000',
+    })
+
+    if (token) {
+        // EventSource cannot send Authorization headers, so pass JWT via query string for the SSE endpoint.
+        params.set('token', token)
+    }
+
+    const eventSource = new EventSource(`/api/workflow-runs/${runId}/events?${params.toString()}`, {
         withCredentials: true,
     })
 
@@ -176,6 +194,32 @@ export function connectRunStream(runId: string, onSnapshot: (run: WorkflowRun) =
     })
 
     return eventSource
+}
+
+function rawToWorkflow(raw: RawWorkflow): Workflow {
+    return {
+        id: raw.id,
+        tenantId: raw.tenant_id,
+        createdBy: raw.created_by,
+        name: raw.name,
+        description: raw.description,
+        status: raw.status,
+        currentVersion: raw.current_version ? rawToWorkflowVersion(raw.current_version) : null,
+        createdAt: raw.created_at ?? undefined,
+        updatedAt: raw.updated_at ?? undefined,
+    }
+}
+
+function rawToWorkflowVersion(raw: RawWorkflowVersion): WorkflowVersion {
+    return {
+        id: raw.id,
+        versionNumber: raw.version_number,
+        definition: raw.definition,
+        source: raw.source,
+        changeSummary: raw.change_summary ?? null,
+        rolledBackFromVersionId: raw.rolled_back_from_version_id ?? null,
+        createdAt: raw.created_at ?? undefined,
+    }
 }
 
 function rawToWorkflowRun(raw: RawWorkflowRun): WorkflowRun {
