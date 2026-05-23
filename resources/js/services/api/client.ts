@@ -137,8 +137,54 @@ export async function createWorkflow(payload: {
     return rawToWorkflow(response.data)
 }
 
+export async function deleteWorkflow(workflowId: string): Promise<void> {
+    await request<void>(`/api/workflows/${workflowId}`, {
+        method: 'DELETE',
+    })
+}
+
+export async function getWorkflow(workflowId: string): Promise<Workflow> {
+    const response = await request<{ data: RawWorkflow }>(`/api/workflows/${workflowId}`)
+    return rawToWorkflow(response.data)
+}
+
+export async function updateWorkflow(workflowId: string, payload: {
+    name?: string
+    description?: string | null
+    status?: string
+    change_summary?: string
+    definition?: unknown
+}): Promise<Workflow> {
+    const response = await request<{ data: RawWorkflow }>(`/api/workflows/${workflowId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+    })
+    return rawToWorkflow(response.data)
+}
+
+export async function triggerWorkflow(workflowId: string, input?: Record<string, unknown>): Promise<WorkflowRun> {
+    const response = await request<{ data: RawWorkflowRun }>(`/api/workflows/${workflowId}/trigger`, {
+        method: 'POST',
+        body: JSON.stringify({ input: input ?? {} }),
+    })
+
+    return rawToWorkflowRun(response.data)
+}
+
 export async function workflowRuns(workflowId: string): Promise<ApiCollection<WorkflowRun>> {
     const response = await request<{ data: RawWorkflowRun[] }>(`/api/workflow-runs?workflow_id=${encodeURIComponent(workflowId)}`)
+    return {
+        ...response,
+        data: response.data.map(rawToWorkflowRun),
+    }
+}
+
+export async function allWorkflowRuns(params: { perPage?: number; status?: string } = {}): Promise<ApiCollection<WorkflowRun>> {
+    const search = new URLSearchParams()
+    if (params.perPage) search.set('per_page', String(params.perPage))
+    if (params.status) search.set('status', params.status)
+    const qs = search.toString()
+    const response = await request<{ data: RawWorkflowRun[] }>(`/api/workflow-runs${qs ? `?${qs}` : ''}`)
     return {
         ...response,
         data: response.data.map(rawToWorkflowRun),

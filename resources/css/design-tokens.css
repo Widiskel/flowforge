@@ -1,0 +1,200 @@
+/* Design tokens from Google Stitch FlowForge project */
+/* Source: projects/6597980107938346661 */
+
+:root {
+  /* Color Palette - Forge Navy Base */
+  --color-surface: #051424;
+  --color-surface-dim: #051424;
+  --color-surface-bright: #2c3a4c;
+  --color-surface-container-lowest: #010f1f;
+  --color-surface-container-low: #0d1c2d;
+  --color-surface-container: #122131;
+  --color-surface-container-high: #1c2b3c;
+  --color-surface-container-highest: #273647;
+  --color-on-surface: #d4e4fa;
+  --color-on-surface-variant: #c6c6cd;
+  --color-inverse-surface: #d4e4fa;
+  --color-inverse-on-surface: #233143;
+  --color-outline: #909097;
+  --color-outline-variant: #45464d;
+  --color-surface-tint: #bec6e0;
+
+  /* Primary - Forge Navy */
+  --color-primary: #bec6e0;
+  --color-on-primary: #283044;
+  --color-primary-container: #0f172a;
+  --color-on-primary-container: #798098;
+  --color-inverse-primary: #565e74;
+  --color-primary-fixed: #dae2fd;
+  --color-primary-fixed-dim: #bec6e0;
+  --color-on-primary-fixed: #131b2e;
+  --color-on-primary-fixed-variant: #3f465c;
+
+  /* Secondary - Energy Cyan */
+  --color-secondary: #7bd0ff;
+  --color-on-secondary: #00354a;
+  --color-secondary-container: #00a6e0;
+  --color-on-secondary-container: #00374d;
+  --color-secondary-fixed: #c4e7ff;
+  --color-secondary-fixed-dim: #7bd0ff;
+  --color-on-secondary-fixed: #001e2c;
+  --color-on-secondary-fixed-variant: #004c69;
+
+  /* Tertiary - Slate */
+  --color-tertiary: #bcc7de;
+  --color-on-tertiary: #263143;
+  --color-tertiary-container: #0c1829;
+  --color-on-tertiary-container: #768197;
+  --color-tertiary-fixed: #d8e3fb;
+  --color-tertiary-fixed-dim: #bcc7de;
+  --color-on-tertiary-fixed: #111c2d;
+  --color-on-tertiary-fixed-variant: #3c475a;
+
+  /* Error */
+  --color-error: #ffb4ab;
+  --color-on-error: #690005;
+  --color-error-container: #93000a;
+  --color-on-error-container: #ffdad6;
+
+  /* Background */
+  --color-background: #051424;
+  --color-on-background: #d4e4fa;
+
+  /* Surface Variant */
+  --color-surface-variant: #273647;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-base: 4px;
+  --space-gutter: 16px;
+  --space-margin-mobile: 16px;
+  --space-margin-desktop: 32px;
+
+  /* Border Radius */
+  --radius-sm: 0.125rem;
+  --radius-default: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  /* Typography - Inter (Body/Headline) */
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-headline: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-label: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-code: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+
+  /* Typography Scale */
+  --text-headline-lg: 32px;
+  --text-headline-md: 24px;
+  --text-headline-sm: 20px;
+  --text-body-lg: 16px;
+  --text-body-md: 14px;
+  --text-body-sm: 12px;
+  --text-label-caps: 11px;
+
+  /* Typography Weights */
+  --font-weight-headline: 700;
+  --font-weight-body: 400;
+  --font-weight-label: 700;
+
+  /* Typography Line Height */
+  --line-height-headline-lg: 40px;
+  --line-height-headline-md: 32px;
+  --line-height-headline-sm: 28px;
+  --line-height-body-lg: 24px;
+  --line-height-body-md: 20px;
+  --line-height-body-sm: 16px;
+  --line-height-label-caps: 16px;
+
+  /* Typography Letter Spacing */
+  --letter-spacing-headline-lg: -0.02em;
+  --letter-spacing-headline-md: -0.01em;
+  --letter-spacing-label-caps: 0.05em;
+
+  /* Component: Button */
+  --btn-primary-bg: var(--color-secondary-container);
+  --btn-primary-color: var(--color-on-secondary-container);
+  --btn-primary-hover-bg: #00b8f0;
+  --btn-primary-active-bg: #0094c4;
+
+  --btn-secondary-bg: transparent;
+  --btn-secondary-border: var(--color-outline-variant);
+  --btn-secondary-color: var(--color-on-surface-variant);
+  --btn-secondary-hover-bg: rgba(123, 208, 255, 0.08);
+  --btn-secondary-active-bg: rgba(123, 208, 255, 0.12);
+
+  --btn-ghost-bg: transparent;
+  --btn-ghost-color: var(--color-on-surface);
+  --btn-ghost-hover-bg: rgba(212, 228, 250, 0.08);
+  --btn-ghost-active-bg: rgba(212, 228, 250, 0.12);
+
+  /* Component: Card */
+  --card-bg: var(--color-surface-container);
+  --card-border: var(--color-outline-variant);
+  --card-radius: var(--radius-md);
+
+  /* Component: Node (DAG) */
+  --node-bg: var(--color-surface-container);
+  --node-border: var(--color-secondary);
+  --node-border-radius: var(--radius-default);
+  --node-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --node-selected-border: var(--color-secondary);
+  --node-selected-shadow: 0 0 0 2px rgba(123, 208, 255, 0.2);
+
+  /* Component: Status Badge */
+  --status-running-bg: rgba(123, 208, 255, 0.12);
+  --status-running-color: var(--color-secondary);
+  --status-success-bg: rgba(52, 211, 153, 0.12);
+  --status-success-color: #34d399;
+  --status-failed-bg: rgba(251, 113, 133, 0.12);
+  --status-failed-color: #fb7185;
+  --status-warning-bg: rgba(251, 191, 36, 0.12);
+  --status-warning-color: #fbbf24;
+  --status-recovered-bg: rgba(167, 139, 250, 0.12);
+  --status-recovered-color: #a78bfa;
+
+  /* Component: Input */
+  --input-bg: var(--color-surface-container-lowest);
+  --input-border: var(--color-outline-variant);
+  --input-color: var(--color-on-surface);
+  --input-focus-border: var(--color-secondary);
+  --input-focus-shadow: 0 0 0 2px rgba(123, 208, 255, 0.2);
+
+  /* Component: Modal/Overlay */
+  --overlay-bg: rgba(1, 15, 31, 0.8);
+  --modal-bg: var(--color-surface-container-high);
+  --modal-border: var(--color-outline-variant);
+  --modal-radius: var(--radius-lg);
+
+  /* Component: Sidebar */
+  --sidebar-bg: var(--color-surface-container-high);
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 80px;
+
+  /* Component: Tenant Rail */
+  --tenant-rail-bg: #020a14;
+  --tenant-rail-width: 160px;
+
+  /* Component: Topbar */
+  --topbar-height: 64px;
+  --topbar-bg: var(--color-surface-container-high);
+  --topbar-border: var(--color-outline-variant);
+
+  /* Component: Canvas */
+  --canvas-bg: var(--color-surface);
+  --canvas-grid-color: rgba(144, 144, 151, 0.1);
+  --canvas-zoom-controls-bg: var(--color-surface-container);
+  --canvas-zoom-controls-border: var(--color-outline-variant);
+
+  /* Component: Log Viewer */
+  --log-bg: #000000;
+  --log-color: #e5e7eb;
+  --log-line-number-color: #6b7280;
+  --log-timestamp-color: #9ca3af;
+  --log-message-color: var(--color-on-surface);
+}

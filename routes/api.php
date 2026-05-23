@@ -22,7 +22,7 @@ Route::prefix('auth')->group(function (): void {
     Route::get('/me', [AuthController::class, 'me'])->middleware('auth:api');
 });
 
-Route::middleware(['auth:api', 'tenant'])->group(function (): void {
+Route::middleware(['jwt.query', 'auth:api', 'tenant'])->group(function (): void {
     Route::get('/workflows', [WorkflowController::class, 'index']);
     Route::post('/workflows', [WorkflowController::class, 'store']);
     Route::get('/workflows/{workflow}', [WorkflowController::class, 'show']);

@@ -54,7 +54,7 @@ export type WorkflowVersion = {
     createdAt?: string
 }
 
-export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived'
+export type WorkflowStatus = 'draft' | 'active' | 'archived'
 
 export type Workflow = {
     id: string
