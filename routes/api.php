@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Monitoring\HealthMetricsController;
+use App\Http\Controllers\Workflow\ExecutionLogController;
+use App\Http\Controllers\Workflow\RunEventStreamController;
 use App\Http\Controllers\Workflow\WebhookController;
 use App\Http\Controllers\Workflow\WorkflowController;
 use App\Http\Controllers\Workflow\WorkflowRunController;
@@ -33,6 +36,9 @@ Route::middleware(['auth:api', 'tenant'])->group(function (): void {
 
     Route::get('/workflow-runs', [WorkflowRunController::class, 'index']);
     Route::get('/workflow-runs/{run}', [WorkflowRunController::class, 'show']);
+    Route::get('/workflow-runs/{run}/events', [RunEventStreamController::class, '__invoke']);
+    Route::get('/workflow-runs/{run}/logs', [ExecutionLogController::class, '__invoke']);
+    Route::get('/health/metrics', [HealthMetricsController::class, '__invoke']);
 });
 
 Route::post('/webhooks/{workflow}', WebhookController::class);
