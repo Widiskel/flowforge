@@ -105,6 +105,7 @@ export type WorkflowRun = {
     durationMs?: number | null
     createdAt?: string
     updatedAt?: string
+    createdBy?: number | string
     stepRuns?: StepRun[]
     logs?: ExecutionLog[]
 }
@@ -130,6 +131,19 @@ export type AiFailureAnalysis = {
     category: string
     evidence: Array<{ observation: string; source: string }>
     createdAt?: string
+}
+
+export type RawAiFailureAnalysis = {
+    id: string
+    workflow_run_id: string
+    workflow_step_run_id: string | null
+    attempt_count: number
+    root_cause: string
+    suggested_fix: string
+    confidence: 'low' | 'medium' | 'high'
+    category: string
+    evidence: Array<{ observation: string; source: string }>
+    created_at?: string
 }
 
 export type HealthMetrics = {
