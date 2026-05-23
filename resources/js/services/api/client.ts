@@ -25,11 +25,24 @@ const jsonHeaders = {
     'Content-Type': 'application/json',
 }
 
+let accessTokenProvider: (() => string | null) | null = null
+
+export function setAccessTokenProvider(provider: () => string | null): void {
+    accessTokenProvider = provider
+}
+
+function authHeaders(): Record<string, string> {
+    const token = accessTokenProvider?.() ?? null
+
+    return token === null ? {} : { Authorization: `Bearer ${token}` }
+}
+
 async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(url, {
         ...init,
         headers: {
             ...jsonHeaders,
+            ...authHeaders(),
             ...(init.headers ?? {}),
         },
     })
@@ -51,13 +64,23 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     return payload as T
 }
 
-export async function login(email: string, password: string): Promise<AuthTokenPair> {
-    const response = await request<ApiItem<AuthTokenPair>>('/api/auth/login', {
+export interface LoginResponse {
+    tokens: AuthTokenPair
+    user: AuthUser
+}
+
+interface RawLoginResponse {
+    data: AuthTokenPair
+    user: AuthUser
+}
+
+export async function login(email: string, password: string): Promise<LoginResponse> {
+    const response = await request<RawLoginResponse>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
     })
 
-    return response.data
+    return { tokens: response.data, user: response.user }
 }
 
 export async function refreshToken(refreshToken: string): Promise<AuthTokenPair> {

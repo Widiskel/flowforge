@@ -1,6 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { currentUser, login as apiLogin, logout as apiLogout, refreshToken as apiRefreshToken } from '@/services/api/client'
+import {
+    currentUser,
+    login as apiLogin,
+    logout as apiLogout,
+    refreshToken as apiRefreshToken,
+    setAccessTokenProvider,
+} from '@/services/api/client'
 import type { AuthTokenPair, AuthUser } from '@/types/api'
 
 const ACCESS_TOKEN_KEY = 'flowforge.access_token'
@@ -13,6 +19,8 @@ export const useAuthStore = defineStore('auth', () => {
     const error = ref<string | null>(null)
     const accessToken = ref<string | null>(localStorage.getItem(ACCESS_TOKEN_KEY))
     const refreshTokenValue = ref<string | null>(localStorage.getItem(REFRESH_TOKEN_KEY))
+
+    setAccessTokenProvider(() => accessToken.value)
 
     const isAuthenticated = computed(() => accessToken.value !== null)
     const canTrigger = computed(() => user.value?.role === 'admin' || user.value?.role === 'editor')
@@ -59,9 +67,9 @@ export const useAuthStore = defineStore('auth', () => {
         error.value = null
 
         try {
-            const tokens = await apiLogin(email, password)
+            const { tokens, user: signedIn } = await apiLogin(email, password)
             persistTokens(tokens)
-            user.value = await currentUser()
+            user.value = signedIn
         } catch (exception) {
             persistTokens(null)
             user.value = null
