@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Workflow\WorkflowController;
+use App\Http\Controllers\Workflow\WorkflowRunController;
 use App\Http\Controllers\Workflow\WorkflowVersionController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,4 +24,9 @@ Route::middleware(['auth:api', 'tenant'])->group(function (): void {
 
     Route::get('/workflows/{workflow}/versions', [WorkflowVersionController::class, 'index']);
     Route::post('/workflows/{workflow}/rollback/{version}', [WorkflowVersionController::class, 'rollback']);
+
+    Route::post('/workflows/{workflow}/trigger', [WorkflowRunController::class, 'trigger']);
+
+    Route::get('/workflow-runs', [WorkflowRunController::class, 'index']);
+    Route::get('/workflow-runs/{run}', [WorkflowRunController::class, 'show']);
 });
