@@ -101,6 +101,7 @@ class WorkflowExecutor
     {
         $maxAttempts = $step['retry']['maxAttempts'] ?? 1;
         $initialDelayMs = $step['retry']['initialDelayMs'] ?? 1000;
+        $maxDelayMs = $step['retry']['maxDelayMs'] ?? null;
         $backoff = $step['retry']['backoff'] ?? 'exponential';
 
         $lastResult = null;
@@ -116,7 +117,11 @@ class WorkflowExecutor
                 ? $initialDelayMs * (2 ** ($attempt - 1))
                 : $initialDelayMs;
 
-            usleep(min($delay, 10000) * 1000); // cap at 10s for safety
+            if (is_int($maxDelayMs)) {
+                $delay = min($delay, $maxDelayMs);
+            }
+
+            usleep($delay * 1000);
         }
 
         return $lastResult;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Workflow\Handlers;
 
 use App\Domain\Workflow\Enums\StepRunStatus;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
 class HttpStepHandler implements StepHandler
@@ -26,7 +27,7 @@ class HttpStepHandler implements StepHandler
             }
 
             return new StepResult(StepRunStatus::FAILED, ['status' => $response->status()], 'HTTP request failed with status '.$response->status());
-        } catch (\Throwable $e) {
+        } catch (ConnectionException $e) {
             return new StepResult(StepRunStatus::FAILED, [], $e->getMessage());
         }
     }
