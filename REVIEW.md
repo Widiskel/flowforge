@@ -56,6 +56,26 @@ Verifikasi setelah fix: 50 tests pass (138 assertions), pint pass.
 
 Putusan: OK merge.
 
+## PR #5 — feat(trigger): add scheduled and webhook triggers
+
+- Branch: `feature/workflow-triggers-scheduled-webhook`
+- PR: https://github.com/Widiskel/flowforge/pull/5
+- Status: merged
+
+Catatan review:
+- Scheduled trigger pakai Laravel scheduler + queue worker. Pastikan queue worker jalan di production (`php artisan queue:work`).
+- Webhook signature verification pakai `hash_equals` — good, constant-time comparison buat ngelawan timing attack.
+- `WorkflowTriggerController` sekarang bisa handle manual/scheduled/webhook via `TriggerWorkflowAction`. Intent-nya jelas, single responsibility.
+- Cron validation di `ValidateCronRequest` pakai `CronExpression`. Solid choice, nggak perlu reinvent the wheel.
+
+Tindak lanjut:
+- Dokumentasi API endpoint `/api/workflows/{workflow}/trigger` + `/webhook/{workflow_id}/{signature}`.
+- Add health check endpoint buat scheduler status (pending jobs, last run, etc).
+
+Verifikasi setelah fix: 60 tests pass (165+ assertions), pint pass, typecheck hijau, build sukses.
+
+Putusan: OK merge.
+
 ## PR #4 — feat(trigger): manual workflow run execution
 
 - Branch: `feature/workflow-triggers`
