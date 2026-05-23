@@ -5,35 +5,33 @@ declare(strict_types=1);
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class WorkflowStepRun extends Model
+class AiAuditLog extends Model
 {
-    use HasFactory, HasUuids;
+    use HasUuids;
+
+    protected $table = 'ai_audit_log';
 
     protected $fillable = [
         'tenant_id',
         'workflow_run_id',
-        'step_id',
-        'step_type',
+        'workflow_step_run_id',
+        'requested_by',
+        'provider',
+        'model',
+        'prompt_tokens',
+        'completion_tokens',
         'status',
-        'attempt_count',
-        'max_attempts',
-        'started_at',
-        'finished_at',
-        'duration_ms',
-        'output',
-        'error_message',
+        'metadata',
+        'created_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'output' => 'array',
-            'started_at' => 'datetime',
-            'finished_at' => 'datetime',
+            'metadata' => 'array',
         ];
     }
 

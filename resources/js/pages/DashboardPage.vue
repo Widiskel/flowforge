@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { MarkerType, VueFlow, type Edge, type Node } from '@vue-flow/core'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ApiError, connectRunStream as apiConnectRunStream, healthMetrics as fetchHealthMetrics, runLogs, workflowRun, workflowRuns, workflows as fetchWorkflows } from '../services/api/client'
+import { ApiError, analyzeFailure, connectRunStream as apiConnectRunStream, healthMetrics as fetchHealthMetrics, runLogs, workflowRun, workflowRuns, workflows as fetchWorkflows } from '../services/api/client'
 import { useAuthStore } from '../stores/auth'
-import type { ExecutionLog, HealthMetrics, Workflow, WorkflowRun, WorkflowStepDefinition } from '../types/api'
+import type { ExecutionLog, HealthMetrics, Workflow, WorkflowRun, WorkflowStepDefinition, AiFailureAnalysis } from '../types/api'
 
 const auth = useAuthStore()
 
@@ -18,6 +18,8 @@ const loading = ref(true)
 const triggering = ref(false)
 const error = ref<string | null>(null)
 const streamState = ref<'idle' | 'connecting' | 'live' | 'closed' | 'error'>('idle')
+const analyzingFailure = ref(false)
+const failureAnalysis = ref<AiFailureAnalysis | null>(null)
 let eventSource: EventSource | null = null
 
 const activeSteps = computed(() => selectedWorkflow.value?.currentVersion?.definition.steps ?? [])
@@ -54,6 +56,8 @@ onBeforeUnmount(() => {
 })
 
 watch(selectedRun, async (run) => {
+    failureAnalysis.value = null
+
     if (!selectedWorkflow.value || !run) {
         logs.value = []
         return
@@ -204,6 +208,21 @@ async function loadRunLogs(runId: string): Promise<void> {
         if (!(exception instanceof ApiError && exception.status === 404)) {
             error.value = exception instanceof Error ? exception.message : 'Failed to load logs.'
         }
+    }
+}
+
+async function analyzeSelectedFailure(): Promise<void> {
+    if (!selectedRun.value || !['FAILED', 'TIMEOUT'].includes(selectedRun.value.status)) return
+
+    analyzingFailure.value = true
+    error.value = null
+
+    try {
+        failureAnalysis.value = await analyzeFailure(selectedRun.value.id)
+    } catch (exception) {
+        error.value = exception instanceof Error ? exception.message : 'Failed to analyze failure.'
+    } finally {
+        analyzingFailure.value = false
     }
 }
 
@@ -387,6 +406,32 @@ function statusClass(status?: string): string {
                                 <small>{{ stepRun.stepType }} · attempts {{ stepRun.attemptCount }}/{{ stepRun.maxAttempts }}</small>
                             </div>
                             <span class="status-pill" :class="statusClass(stepRun.status)">{{ stepRun.status }}</span>
+                        </div>
+                    </div>
+
+                    <div v-if="['FAILED', 'TIMEOUT'].includes(selectedRun.status)" class="ai-card">
+                        <div class="ai-card__head">
+                            <div>
+                                <p class="eyebrow">AI failure analysis</p>
+                                <strong>Root cause assistant</strong>
+                            </div>
+                            <button class="ghost-button compact" type="button" :disabled="!auth.canTrigger || analyzingFailure" @click="analyzeSelectedFailure">
+                                {{ analyzingFailure ? 'Analyzing…' : 'Analyze' }}
+                            </button>
+                        </div>
+                        <p v-if="!auth.canTrigger" class="empty-copy">Viewer role can read runs but cannot request analysis.</p>
+                        <div v-if="analyzingFailure" class="loading-copy">Building sanitized failure context…</div>
+                        <div v-if="failureAnalysis" class="analysis-result">
+                            <span class="status-pill">{{ failureAnalysis.category }} · {{ failureAnalysis.confidence }}</span>
+                            <h4>Root cause</h4>
+                            <p>{{ failureAnalysis.rootCause }}</p>
+                            <h4>Suggested fix</h4>
+                            <p>{{ failureAnalysis.suggestedFix }}</p>
+                            <ul>
+                                <li v-for="(item, index) in failureAnalysis.evidence" :key="index">
+                                    <strong>{{ item.source }}</strong> — {{ item.observation }}
+                                </li>
+                            </ul>
                         </div>
                     </div>
 

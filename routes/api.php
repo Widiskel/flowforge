@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Ai\AnalyzeFailureController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Monitoring\HealthMetricsController;
 use App\Http\Controllers\Workflow\ExecutionLogController;
@@ -39,6 +40,7 @@ Route::middleware(['auth:api', 'tenant'])->group(function (): void {
     Route::get('/workflow-runs/{run}/events', [RunEventStreamController::class, '__invoke']);
     Route::get('/workflow-runs/{run}/logs', [ExecutionLogController::class, '__invoke']);
     Route::get('/health/metrics', [HealthMetricsController::class, '__invoke']);
+    Route::post('/workflow-runs/{run}/analyze-failure', [AnalyzeFailureController::class, '__invoke']);
 });
 
 Route::post('/webhooks/{workflow}', WebhookController::class);
