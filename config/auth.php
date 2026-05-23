@@ -20,6 +20,11 @@ return [
         'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 
+    'jwt' => [
+        'ttl' => (int) env('JWT_TTL', 15),
+        'refresh_ttl' => (int) env('JWT_REFRESH_TTL', 20160),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Authentication Guards
@@ -40,6 +45,10 @@ return [
     'guards' => [
         'web' => [
             'driver' => 'session',
+            'provider' => 'users',
+        ],
+        'api' => [
+            'driver' => 'jwt',
             'provider' => 'users',
         ],
     ],
