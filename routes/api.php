@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Ai\AnalyzeFailureController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Monitoring\HealthMetricsController;
+use App\Http\Controllers\Monitoring\OperationalProbeController;
 use App\Http\Controllers\Workflow\ExecutionLogController;
 use App\Http\Controllers\Workflow\RunEventStreamController;
 use App\Http\Controllers\Workflow\WebhookController;
@@ -42,5 +43,9 @@ Route::middleware(['auth:api', 'tenant'])->group(function (): void {
     Route::get('/health/metrics', [HealthMetricsController::class, '__invoke']);
     Route::post('/workflow-runs/{run}/analyze-failure', [AnalyzeFailureController::class, '__invoke']);
 });
+
+Route::get('/healthz/ready', [OperationalProbeController::class, 'ready']);
+Route::get('/healthz/startup', [OperationalProbeController::class, 'startup']);
+Route::get('/actuator/health', [OperationalProbeController::class, 'actuator']);
 
 Route::post('/webhooks/{workflow}', WebhookController::class);
