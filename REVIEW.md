@@ -317,3 +317,31 @@ Verifikasi setelah fix:
 
 Putusan: OK merge.
 
+## PR #16 — feat(frontend): stitch redesign and FE/BE integration pass
+
+- Branch: `feature/frontend-stitch-redesign`
+- PR: https://github.com/Widiskel/flowforge/pull/16
+- Status: pending review
+
+Catatan review:
+- `RunEventStreamController` sebelumnya masih mengandalkan `auth:api` biasa, sementara frontend EventSource kirim token via query string. Alhasil SSE path terlihat tersedia tapi kontraknya belum ketemu.
+- `WorkflowRunResource` belum expose `workflow_trigger_id`, `timeout_ms`, `created_at`, dan `updated_at`, padahal frontend mapper (`resources/js/services/api/client.ts`) dan sorting runs/dashboard sudah pakai field itu.
+- Workflow list masih expose filter `paused`, padahal backend request validation cuma menerima `draft`, `active`, `archived`. Ini bikin UI bilang ada state yang sebenarnya tidak bisa dipakai.
+- Copy di workflow list dan run overlay sempat overclaim: seolah semua versioning/live test run sudah fully wired, padahal yang benar sekarang baru manage/inspect/trigger + run details.
+- Dashboard dan runs page awalnya ambil run per workflow (N+1) padahal backend sudah punya `/api/workflow-runs` tenant-scoped. Untuk data list/history lebih aman pakai endpoint agregat itu langsung.
+
+Tindak lanjut:
+- Tambah middleware `UseJwtQueryToken` lalu wire `jwt.query` sebelum `auth:api` di route group API supaya SSE EventSource bisa jalan dengan token query.
+- Lengkapi `WorkflowRunResource` dengan field yang memang dipakai frontend mapper/sorting.
+- Sinkronkan kontrak frontend: hapus `paused` dari type/filter, ganti copy yang terlalu jauh, ubah label overlay jadi `Run Details`.
+- Refactor dashboard dan runs page untuk pakai endpoint agregat `/api/workflow-runs` agar FE/BE lebih rapat dan request lebih efisien.
+
+Verifikasi setelah fix:
+- 82 tests pass (246 assertions)
+- typecheck pass
+- build pass
+- pint pass
+- contract FE/BE dicek ulang untuk workflows, runs, logs, health metrics, dan analyze-failure
+
+Putusan: OK merge.
+

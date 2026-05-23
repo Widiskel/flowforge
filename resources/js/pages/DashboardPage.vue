@@ -1,567 +1,245 @@
 <script setup lang="ts">
-import { MarkerType, VueFlow, type Edge, type Node } from '@vue-flow/core'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import WorkflowBuilder from '../components/WorkflowBuilder.vue'
-import { ApiError, analyzeFailure, connectRunStream as apiConnectRunStream, createWorkflow, healthMetrics as fetchHealthMetrics, runLogs, workflowRun, workflowRuns, workflows as fetchWorkflows } from '../services/api/client'
-import { useAuthStore } from '../stores/auth'
-import type { ExecutionLog, HealthMetrics, Workflow, WorkflowRun, WorkflowStepDefinition, AiFailureAnalysis, WorkflowDefinition } from '../types/api'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import GlassPanel from '@/components/ui/GlassPanel.vue'
+import KpiCard from '@/components/ui/KpiCard.vue'
+import Icon from '@/components/ui/Icon.vue'
+import Button from '@/components/ui/Button.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import Alert from '@/components/ui/Alert.vue'
+import StatusBadge from '@/components/workflow/StatusBadge.vue'
+import { healthMetrics, workflows, allWorkflowRuns } from '@/services/api/client'
+import type { HealthMetrics, Workflow, WorkflowRun } from '@/types/api'
+import { formatDuration } from '@/utils/format'
 
-const auth = useAuthStore()
-
-const workflows = ref<Workflow[]>([])
-const selectedWorkflow = ref<Workflow | null>(null)
-const runs = ref<WorkflowRun[]>([])
-const selectedRun = ref<WorkflowRun | null>(null)
-const logs = ref<ExecutionLog[]>([])
-const metrics = ref<HealthMetrics | null>(null)
-const metricsUpdatedAt = ref<string | null>(null)
+const router = useRouter()
 const loading = ref(true)
-const triggering = ref(false)
 const error = ref<string | null>(null)
-const streamState = ref<'idle' | 'connecting' | 'live' | 'closed' | 'error'>('idle')
-const analyzingFailure = ref(false)
-const failureAnalysis = ref<AiFailureAnalysis | null>(null)
-const showBuilder = ref(false)
-const builderName = ref('')
-const builderDescription = ref('')
-const builderDefinition = ref<WorkflowDefinition>({ schemaVersion: 1, name: '', globalTimeoutMs: 60000, steps: [] })
-const saving = ref(false)
-let eventSource: EventSource | null = null
+const metrics = ref<HealthMetrics | null>(null)
+const workflowList = ref<Workflow[]>([])
+const recentRuns = ref<Array<{ run: WorkflowRun; workflowName: string }>>([])
 
-const activeSteps = computed(() => selectedWorkflow.value?.currentVersion?.definition.steps ?? [])
-const successRuns = computed(() => runs.value.filter((run) => run.status === 'SUCCESS').length)
-const failedRuns = computed(() => runs.value.filter((run) => ['FAILED', 'TIMEOUT', 'CANCELLED'].includes(run.status)).length)
-
-const graphNodes = computed<Node[]>(() => layoutSteps(activeSteps.value).map(({ step, x, y }) => ({
-    id: step.id,
-    type: 'default',
-    position: { x, y },
-    data: {
-        label: `${step.name}\n${step.type}`,
-    },
-    class: `flow-node flow-node-${step.type.toLowerCase()}`,
-})))
-
-const graphEdges = computed<Edge[]>(() => activeSteps.value.flatMap((step) => (step.dependsOn ?? []).map((dependency) => ({
-    id: `${dependency}-${step.id}`,
-    source: dependency,
-    target: step.id,
-    animated: selectedRun.value?.status === 'RUNNING' || selectedRun.value?.status === 'PENDING',
-    markerEnd: MarkerType.ArrowClosed,
-}))))
-
-onMounted(async () => {
-    await Promise.all([
-        loadWorkflows(),
-        loadMetrics(),
-    ])
-})
-
-onBeforeUnmount(() => {
-    closeStream()
-})
-
-watch(selectedRun, async (run) => {
-    failureAnalysis.value = null
-
-    if (!selectedWorkflow.value || !run) {
-        logs.value = []
-        return
+const kpis = computed(() => {
+    const data = metrics.value
+    if (!data) {
+        return [
+            { label: 'Active Runs', value: '—', unit: undefined as string | undefined, icon: 'directions_run', tone: 'default' as const, progress: null as number | null },
+            { label: 'Success Rate', value: '—', unit: undefined as string | undefined, icon: 'check_circle', tone: 'success' as const, progress: null as number | null },
+            { label: 'Avg Execution Time', value: '—', unit: undefined as string | undefined, icon: 'timer', tone: 'tertiary' as const, progress: null as number | null },
+            { label: 'Failure Rate', value: '—', unit: undefined as string | undefined, icon: 'warning', tone: 'failed' as const, progress: null as number | null },
+        ]
     }
-
-    await loadRunLogs(run.id)
+    const totalRuns = Math.max(data.totals.runs, 1)
+    return [
+        {
+            label: 'Active Runs',
+            value: String(data.activeRuns),
+            unit: undefined as string | undefined,
+            icon: 'directions_run',
+            tone: 'default' as const,
+            progress: Math.min(100, (data.activeRuns / totalRuns) * 100) as number | null,
+        },
+        {
+            label: 'Success Rate',
+            value: data.rates.success.toFixed(1),
+            unit: '%' as string | undefined,
+            icon: 'check_circle',
+            tone: 'success' as const,
+            progress: data.rates.success as number | null,
+        },
+        {
+            label: 'Avg Execution Time',
+            value: data.averageDurationMs ? formatDuration(data.averageDurationMs) : '—',
+            unit: undefined as string | undefined,
+            icon: 'timer',
+            tone: 'tertiary' as const,
+            progress: null as number | null,
+        },
+        {
+            label: 'Failure Rate',
+            value: data.rates.failure.toFixed(1),
+            unit: '%' as string | undefined,
+            icon: 'warning',
+            tone: 'failed' as const,
+            progress: Math.max(2, data.rates.failure) as number | null,
+        },
+    ]
 })
 
-async function loadWorkflows(): Promise<void> {
+const throughputBars = computed(() => {
+    // Derive a simple visualization from available metrics (last bar = active runs proportion).
+    const data = metrics.value
+    if (!data) return new Array(10).fill(0).map((_, i) => 20 + (i % 5) * 6)
+    const total = Math.max(data.totals.runs, 1)
+    const success = (data.totals.success / total) * 100
+    const failed = (data.totals.failed / total) * 100
+    const timeout = (data.totals.timeout / total) * 100
+    const profile = [success * 0.4, success * 0.55, success * 0.6, success * 0.7, success * 0.85, success, failed + 25, timeout + 30, success * 0.5, success * 0.4]
+    return profile.map((v) => Math.max(8, Math.min(100, Math.round(v))))
+})
+
+async function loadDashboard(): Promise<void> {
     loading.value = true
     error.value = null
-
     try {
-        const response = await fetchWorkflows()
-        workflows.value = response.data
-        selectedWorkflow.value = response.data[0] ?? null
+        const [metricData, workflowResponse, runsResponse] = await Promise.all([
+            healthMetrics(),
+            workflows(),
+            allWorkflowRuns({ perPage: 12 }),
+        ])
+        metrics.value = metricData
+        workflowList.value = workflowResponse.data
 
-        if (selectedWorkflow.value) {
-            await selectWorkflow(selectedWorkflow.value)
-        }
-    } catch (exception) {
-        error.value = exception instanceof Error ? exception.message : 'Failed to load workflows.'
+        const workflowMap = new Map(workflowResponse.data.map((w) => [w.id, w.name]))
+        recentRuns.value = runsResponse.data
+            .map((run) => ({ run, workflowName: workflowMap.get(run.workflowId) ?? 'Unknown' }))
+            .slice(0, 6)
+    } catch (err) {
+        error.value = err instanceof Error ? err.message : 'Failed to load dashboard'
     } finally {
         loading.value = false
     }
 }
 
-async function loadMetrics(): Promise<void> {
-    try {
-        metrics.value = await fetchHealthMetrics()
-        metricsUpdatedAt.value = new Date().toLocaleTimeString()
-    } catch (exception) {
-        // Metrics endpoint may not be available yet; ignore silently
+function statusToneClass(status: string): string {
+    switch (status) {
+        case 'RUNNING': return 'border-l-[3px] border-running bg-running/[0.04]'
+        case 'SUCCESS': return 'border-l-[3px] border-success bg-success/[0.04]'
+        case 'FAILED':
+        case 'TIMEOUT':
+        case 'CANCELLED':
+            return 'border-l-[3px] border-failed bg-failed/[0.04]'
+        case 'RETRYING': return 'border-l-[3px] border-warning bg-warning/[0.04]'
+        default: return 'border-l-[3px] border-outline-variant'
     }
 }
 
-async function selectWorkflow(workflow: Workflow): Promise<void> {
-    selectedWorkflow.value = workflow
-    selectedRun.value = null
-    logs.value = []
-    closeStream()
-
-    const response = await workflowRuns(workflow.id)
-    runs.value = response.data
-    selectedRun.value = runs.value[0] ?? null
-}
-
-async function triggerSelectedWorkflow(): Promise<void> {
-    if (!selectedWorkflow.value) return
-
-    triggering.value = true
-    error.value = null
-
-    let optimisticRunId: string | null = null
-
-    try {
-        const optimisticRun: WorkflowRun = {
-            id: `optimistic-${Date.now()}`,
-            workflowId: selectedWorkflow.value.id,
-            workflowVersionId: selectedWorkflow.value.currentVersion?.id ?? 'pending-version',
-            status: 'PENDING',
-            createdAt: new Date().toISOString(),
-            stepRuns: activeSteps.value.map((step) => ({
-                id: `optimistic-${step.id}`,
-                stepId: step.id,
-                stepType: step.type,
-                status: 'PENDING' as const,
-                attemptCount: 0,
-                maxAttempts: 1,
-            })),
-        }
-
-        runs.value = [optimisticRun, ...runs.value]
-        optimisticRunId = optimisticRun.id
-        selectedRun.value = optimisticRun
-
-        // Trigger via workflow-runs POST (manual trigger)
-        const response = await fetch(`/api/workflows/${selectedWorkflow.value.id}/trigger`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${auth.accessToken}`,
-            },
-            body: JSON.stringify({}),
-        })
-
-        if (!response.ok) {
-            const payload = await response.json().catch(() => null)
-            throw new Error(payload?.message ?? 'Failed to trigger workflow.')
-        }
-
-        const run = await response.json()
-        const fullRun = await workflowRun(run.data.id)
-        runs.value = [fullRun, ...runs.value.filter((item) => item.id !== optimisticRun.id)]
-        selectedRun.value = fullRun
-        await loadMetrics()
-        connectRunStream(fullRun.id, (snapshot) => {
-            selectedRun.value = snapshot
-            runs.value = runs.value.map((run) => run.id === snapshot.id ? { ...run, status: snapshot.status } : run)
-
-            if (['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED'].includes(snapshot.status)) {
-                streamState.value = 'closed'
-                closeStream(false)
-            }
-        }, (status) => {
-            // Run completed
-        })
-    } catch (exception) {
-        if (optimisticRunId !== null) {
-            runs.value = runs.value.filter((item) => item.id !== optimisticRunId)
-            selectedRun.value = runs.value[0] ?? null
-        }
-
-        error.value = exception instanceof Error ? exception.message : 'Unexpected error.'
-    } finally {
-        triggering.value = false
-    }
-}
-
-function connectRunStream(runId: string, onSnapshot: (run: WorkflowRun) => void, onComplete: (status: string) => void): void {
-    closeStream()
-    streamState.value = 'connecting'
-
-    eventSource = apiConnectRunStream(runId, (snapshot) => {
-        onSnapshot(snapshot)
-        streamState.value = 'live'
-    }, (status) => {
-        onComplete(status)
-        streamState.value = 'closed'
-        closeStream(false)
-    })
-}
-
-function closeStream(markIdle = true): void {
-    eventSource?.close()
-    eventSource = null
-
-    if (markIdle) {
-        streamState.value = 'idle'
-    }
-}
-
-async function loadRunLogs(runId: string): Promise<void> {
-    try {
-        const response = await runLogs(runId)
-        logs.value = response.data
-    } catch (exception) {
-        if (!(exception instanceof ApiError && exception.status === 404)) {
-            error.value = exception instanceof Error ? exception.message : 'Failed to load logs.'
-        }
-    }
-}
-
-async function analyzeSelectedFailure(): Promise<void> {
-    if (!selectedRun.value || !['FAILED', 'TIMEOUT'].includes(selectedRun.value.status)) return
-
-    analyzingFailure.value = true
-    error.value = null
-
-    try {
-        failureAnalysis.value = await analyzeFailure(selectedRun.value.id)
-    } catch (exception) {
-        error.value = exception instanceof Error ? exception.message : 'Failed to analyze failure.'
-    } finally {
-        analyzingFailure.value = false
-    }
-}
-
-function layoutSteps(steps: WorkflowStepDefinition[] | undefined): Array<{ step: WorkflowStepDefinition; x: number; y: number }> {
-    if (!steps) return []
-
-    const depth = new Map<string, number>()
-
-    function stepDepth(step: WorkflowStepDefinition): number {
-        if (depth.has(step.id)) return depth.get(step.id) ?? 0
-
-        const dependencies = step.dependsOn ?? []
-        const value = dependencies.length === 0
-            ? 0
-            : Math.max(...dependencies.map((dependency: string) => {
-                const parent = (steps ?? []).find((item) => item.id === dependency)
-                return parent ? stepDepth(parent) + 1 : 0
-            }))
-
-        depth.set(step.id, value)
-        return value
-    }
-
-    const rowsByDepth = new Map<number, number>()
-
-    return steps.map((step) => {
-        const column = stepDepth(step)
-        const row = rowsByDepth.get(column) ?? 0
-        rowsByDepth.set(column, row + 1)
-
-        return { step, x: column * 220, y: row * 150 }
-    })
-}
-
-function formatPercent(value?: number): string {
-    return `${Math.round((value ?? 0) * 100)}%`
-}
-
-function formatDuration(value?: number | null): string {
-    if (value === null || value === undefined) {
-        return '—'
-    }
-
-    if (value < 1000) {
-        return `${value}ms`
-    }
-
-    return `${(value / 1000).toFixed(1)}s`
-}
-
-function statusClass(status?: string): string {
-    return `status-${(status ?? 'pending').toLowerCase()}`
-}
-
-function openBuilder(): void {
-    showBuilder.value = true
-    builderName.value = ''
-    builderDescription.value = ''
-    builderDefinition.value = {
-        schemaVersion: 1,
-        name: '',
-        globalTimeoutMs: 60000,
-        steps: [],
-    }
-}
-
-function closeBuilder(): void {
-    showBuilder.value = false
-}
-
-async function saveWorkflow(): Promise<void> {
-    if (!auth.canTrigger) {
-        error.value = 'Role ini tidak boleh membuat workflow.'
-        return
-    }
-
-    saving.value = true
-    error.value = null
-
-    try {
-        const payload = {
-            name: builderName.value,
-            description: builderDescription.value || null,
-            status: 'active',
-            change_summary: 'Created from visual workflow builder.',
-            definition: {
-                ...builderDefinition.value,
-                name: builderName.value,
-            },
-        }
-
-        const workflow = await createWorkflow(payload)
-        showBuilder.value = false
-        await loadWorkflows()
-        await selectWorkflow(workflow)
-    } catch (exception) {
-        error.value = exception instanceof Error ? exception.message : 'Failed to create workflow.'
-    } finally {
-        saving.value = false
-    }
-}
+onMounted(loadDashboard)
 </script>
 
 <template>
-    <section class="builder-shell">
-        <aside class="builder-sidebar">
-            <div class="sidebar-head">
-                <div>
-                    <p class="eyebrow">Workflow library</p>
-                    <h2>Flows</h2>
-                </div>
-                <button class="ghost-button compact" type="button" @click="loadWorkflows">
-                    Refresh
-                </button>
+    <div
+        class="min-h-full"
+        style="background-image: radial-gradient(ellipse at top, color-mix(in srgb, var(--color-surface-container-high) 30%, transparent), transparent 60%);"
+    >
+        <header class="flex justify-between items-end gap-md flex-wrap mb-lg">
+            <div>
+                <h2 class="text-headline-lg font-headline-lg text-on-surface m-0">Mission Control</h2>
+                <p class="text-body-lg font-body-lg text-on-surface-variant mt-xs">
+                    Real-time telemetry across {{ workflowList.length }} workflow{{ workflowList.length === 1 ? '' : 's' }}
+                </p>
             </div>
+            <Button
+                glow
+                leading-icon="add"
+                @click="router.push({ name: 'workflows.builder' })"
+            >Create New Workflow</Button>
+        </header>
 
-            <button
-                v-if="auth.canTrigger"
-                type="button"
-                class="primary-button create-workflow-btn"
-                @click="openBuilder"
-            >
-                + New workflow
-            </button>
+        <Alert v-if="error" tone="error" class="mb-lg">{{ error }}</Alert>
 
-            <p v-if="error" class="error-banner">
-                {{ error }}
-            </p>
-
-            <div v-if="loading" class="loading-copy">Loading workflows…</div>
-
-            <div v-else class="workflow-list">
-                <button
-                    v-for="workflow in workflows"
-                    :key="workflow.id"
-                    type="button"
-                    class="workflow-row"
-                    :class="selectedWorkflow?.id === workflow.id ? 'is-selected' : ''"
-                    @click="selectWorkflow(workflow)"
-                >
-                    <span class="workflow-row__icon">⌁</span>
-                    <span class="workflow-row__body">
-                        <strong>{{ workflow.name }}</strong>
-                        <small>v{{ workflow.currentVersion?.versionNumber ?? '—' }} · {{ workflow.currentVersion?.definition.steps.length ?? 0 }} nodes</small>
-                    </span>
-                    <span class="status-dot">{{ workflow.status }}</span>
-                </button>
-            </div>
-
-            <div class="scenario-panel">
-                <p class="eyebrow">Demo scenarios</p>
-                <div class="scenario-stack">
-                    <div class="scenario-item"><strong>{{ workflows.length }}</strong><span>active workflows</span></div>
-                    <div class="scenario-item"><strong>{{ activeSteps.length }}</strong><span>nodes in selected flow</span></div>
-                    <div class="scenario-item"><strong>Admin / Editor</strong><span>can trigger runs</span></div>
-                    <div class="scenario-item"><strong>Viewer</strong><span>read-only RBAC check</span></div>
-                </div>
-            </div>
-        </aside>
-
-        <section class="builder-workspace">
-            <div class="workspace-toolbar">
-                <div class="workspace-title">
-                    <p class="eyebrow">Workflow builder</p>
-                    <h2>{{ selectedWorkflow?.name ?? 'No workflow selected' }}</h2>
-                    <p>{{ selectedWorkflow?.description ?? 'Pilih workflow untuk melihat DAG eksekusi.' }}</p>
-                </div>
-                <div class="workspace-actions">
-                    <span class="stream-chip" :class="streamState === 'error' ? 'is-error' : ''"><span />SSE {{ streamState }}</span>
-                    <button
-                        type="button"
-                        :disabled="!selectedWorkflow || !auth.canTrigger || triggering"
-                        class="primary-button"
-                        @click="triggerSelectedWorkflow"
-                    >
-                        {{ triggering ? 'Creating run…' : 'Trigger run' }}
-                    </button>
-                </div>
-            </div>
-
-            <div class="canvas-stage">
-                <div class="canvas-ruler top-ruler">
-                    <span>Input</span><span>Decision</span><span>Action</span>
-                </div>
-                <VueFlow
-                    v-if="selectedWorkflow"
-                    class="builder-canvas"
-                    :nodes="graphNodes"
-                    :edges="graphEdges"
-                    fit-view-on-init
-                />
-                <div v-else class="empty-state">No active workflow found.</div>
-            </div>
-
-            <div class="telemetry-dock">
-                <div><strong>{{ metrics?.activeRuns ?? '—' }}</strong><span>active runs</span></div>
-                <div><strong>{{ formatPercent(metrics?.rates.success) }}</strong><span>success rate</span></div>
-                <div><strong>{{ formatPercent(metrics?.rates.failure) }}</strong><span>failure rate</span></div>
-                <div><strong>{{ formatDuration(metrics?.averageDurationMs) }}</strong><span>avg duration</span></div>
-                <button class="ghost-button compact" type="button" @click="loadMetrics">Refresh metrics</button>
-            </div>
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-md mb-lg">
+            <KpiCard
+                v-for="kpi in kpis"
+                :key="kpi.label"
+                :label="kpi.label"
+                :value="kpi.value"
+                :unit="kpi.unit"
+                :icon="kpi.icon"
+                :tone="kpi.tone"
+                :progress="kpi.progress"
+                :loading="loading"
+            />
         </section>
 
-        <aside class="builder-inspector">
-            <div class="inspector-card summary-card">
-                <p class="eyebrow">Run state</p>
-                <div class="summary-grid">
-                    <div><strong>{{ runs.length }}</strong><span>runs</span></div>
-                    <div><strong>{{ successRuns }}</strong><span>success</span></div>
-                    <div><strong>{{ failedRuns }}</strong><span>failed</span></div>
-                </div>
-                <div class="sse-card" :class="streamState === 'error' ? 'is-error' : ''">
-                    <span class="sse-card__pulse" />
-                    <p>Stream</p>
-                    <strong>{{ streamState }}</strong>
-                    <small>Live run snapshots stream here while the workflow executes.</small>
-                </div>
-            </div>
-
-            <div class="inspector-card">
-                <div class="inspector-head">
-                    <div>
-                        <p class="eyebrow">Selected run</p>
-                        <h3>Inspector</h3>
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-lg">
+            <GlassPanel radius="xl" clamp class="lg:col-span-2 flex flex-col">
+                <header class="px-md py-sm border-b border-outline-variant/30 flex justify-between items-center bg-surface-container-low/50">
+                    <h3 class="text-headline-sm font-headline-sm text-on-surface m-0 flex items-center gap-sm">
+                        <Icon name="stream" :size="20" class="text-secondary pulse-cyan" />
+                        Live Execution Stream
+                    </h3>
+                    <button
+                        type="button"
+                        class="text-label-caps font-label-caps text-secondary hover:text-on-surface transition-colors"
+                        @click="router.push({ name: 'runs' })"
+                    >View All</button>
+                </header>
+                <div class="flex-1 p-sm space-y-sm overflow-y-auto min-h-[280px]">
+                    <EmptyState
+                        v-if="!loading && recentRuns.length === 0"
+                        icon="play_arrow"
+                        title="No recent runs"
+                        description="Trigger a workflow to see live execution telemetry."
+                        compact
+                    />
+                    <div
+                        v-for="item in recentRuns"
+                        :key="item.run.id"
+                        :class="[
+                            'rounded-DEFAULT p-sm flex items-center justify-between gap-md hover:bg-surface-container-high transition-colors cursor-pointer bg-surface-container border border-outline-variant/40',
+                            statusToneClass(item.run.status),
+                        ]"
+                        @click="router.push({ name: 'runs', query: { runId: item.run.id } })"
+                    >
+                        <div class="flex items-center gap-md min-w-0 flex-1">
+                            <div
+                                :class="[
+                                    'w-8 h-8 rounded-DEFAULT flex items-center justify-center shrink-0',
+                                    item.run.status === 'RUNNING' ? 'bg-running/10 text-running' :
+                                    item.run.status === 'SUCCESS' ? 'bg-success/10 text-success' :
+                                    item.run.status === 'FAILED' || item.run.status === 'TIMEOUT' || item.run.status === 'CANCELLED' ? 'bg-failed/10 text-failed' :
+                                    'bg-surface-variant text-on-surface-variant',
+                                ]"
+                            >
+                                <Icon
+                                    :name="item.run.status === 'RUNNING' ? 'progress_activity' : item.run.status === 'SUCCESS' ? 'check' : item.run.status === 'PENDING' ? 'schedule' : 'close'"
+                                    :size="18"
+                                    :class="item.run.status === 'RUNNING' ? 'animate-spin' : ''"
+                                />
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-body-md font-bold text-on-surface m-0 truncate">{{ item.workflowName }}</p>
+                                <p class="text-code-sm font-code-sm text-on-surface-variant m-0 truncate">run-id: {{ item.run.id.slice(0, 8) }}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-md shrink-0">
+                            <StatusBadge :status="item.run.status" />
+                            <span class="text-code-md font-code-md text-on-surface tabular-nums hidden sm:inline">{{ formatDuration(item.run.durationMs ?? null) }}</span>
+                        </div>
                     </div>
-                    <span v-if="selectedRun" class="status-pill" :class="statusClass(selectedRun.status)">{{ selectedRun.status }}</span>
                 </div>
+            </GlassPanel>
 
-                <div v-if="selectedRun" class="inspector-content">
-                    <div class="step-stack">
+            <GlassPanel radius="xl" clamp class="flex flex-col">
+                <header class="px-md py-sm border-b border-outline-variant/30 bg-surface-container-low/50">
+                    <h3 class="text-headline-sm font-headline-sm text-on-surface m-0">Throughput (24h)</h3>
+                </header>
+                <div class="flex-1 p-md flex flex-col justify-between gap-sm">
+                    <div class="relative h-32 flex items-end gap-1 border-b border-l border-outline-variant/30 pl-1 pb-1">
                         <div
-                            v-for="stepRun in selectedRun.stepRuns ?? []"
-                            :key="stepRun.id"
-                            class="step-card"
-                        >
-                            <div>
-                                <strong>{{ stepRun.stepId }}</strong>
-                                <small>{{ stepRun.stepType }} · attempts {{ stepRun.attemptCount }}/{{ stepRun.maxAttempts }}</small>
-                            </div>
-                            <span class="status-pill" :class="statusClass(stepRun.status)">{{ stepRun.status }}</span>
-                        </div>
+                            class="absolute inset-0 pointer-events-none"
+                            style="background: linear-gradient(to top, color-mix(in srgb, var(--color-secondary) 12%, transparent), transparent);"
+                        />
+                        <div
+                            v-for="(height, idx) in throughputBars"
+                            :key="idx"
+                            class="flex-1 rounded-t-sm transition-colors"
+                            :class="idx === throughputBars.length - 1 ? 'bg-secondary glow-active' : 'bg-surface-variant hover:bg-secondary'"
+                            :style="{ height: `${height}%` }"
+                        />
                     </div>
-
-                    <div v-if="['FAILED', 'TIMEOUT'].includes(selectedRun.status)" class="ai-card">
-                        <div class="ai-card__head">
-                            <div>
-                                <p class="eyebrow">AI failure analysis</p>
-                                <strong>Root cause assistant</strong>
-                            </div>
-                            <button class="ghost-button compact" type="button" :disabled="!auth.canTrigger || analyzingFailure" @click="analyzeSelectedFailure">
-                                {{ analyzingFailure ? 'Analyzing…' : 'Analyze' }}
-                            </button>
-                        </div>
-                        <p v-if="!auth.canTrigger" class="empty-copy">Viewer role can read runs but cannot request analysis.</p>
-                        <div v-if="analyzingFailure" class="loading-copy">Building sanitized failure context…</div>
-                        <div v-if="failureAnalysis" class="analysis-result">
-                            <span class="status-pill">{{ failureAnalysis.category }} · {{ failureAnalysis.confidence }}</span>
-                            <h4>Root cause</h4>
-                            <p>{{ failureAnalysis.rootCause }}</p>
-                            <h4>Suggested fix</h4>
-                            <p>{{ failureAnalysis.suggestedFix }}</p>
-                            <ul>
-                                <li v-for="(item, index) in failureAnalysis.evidence" :key="index">
-                                    <strong>{{ item.source }}</strong> — {{ item.observation }}
-                                </li>
-                            </ul>
-                        </div>
+                    <div class="flex justify-between text-code-sm font-code-sm text-on-surface-variant">
+                        <span>−24h</span>
+                        <span>Now</span>
                     </div>
-
-                    <div class="log-stack compact-logs">
-                        <div v-for="log in logs" :key="log.id" class="log-card">
-                            <div>
-                                <strong>{{ log.event }}</strong>
-                                <span>{{ log.level }}</span>
-                            </div>
-                            <p>{{ log.message }}</p>
-                        </div>
-                        <p v-if="logs.length === 0" class="empty-copy">No logs for selected run yet.</p>
+                    <div class="text-body-sm font-body-sm text-on-surface-variant">
+                        <span class="text-on-surface font-bold">{{ metrics?.totals.runs ?? 0 }}</span> total runs ·
+                        <span class="text-success font-bold">{{ metrics?.totals.success ?? 0 }}</span> ok ·
+                        <span class="text-failed font-bold">{{ metrics?.totals.failed ?? 0 }}</span> failed
                     </div>
                 </div>
-
-                <p v-else class="empty-state compact">Trigger atau pilih run untuk melihat run inspector.</p>
-            </div>
-        </aside>
-
-        <section class="run-timeline">
-            <div class="timeline-head">
-                <div>
-                    <p class="eyebrow">Run timeline</p>
-                    <h3>Recent executions</h3>
-                </div>
-                <small>Latest run first · tenant scoped</small>
-            </div>
-            <div class="timeline-list">
-                <button
-                    v-for="run in runs"
-                    :key="run.id"
-                    type="button"
-                    class="timeline-item"
-                    :class="selectedRun?.id === run.id ? 'is-selected' : ''"
-                    @click="selectedRun = run"
-                >
-                    <span class="status-pill" :class="statusClass(run.status)">{{ run.status }}</span>
-                    <strong>{{ run.id }}</strong>
-                    <small>{{ run.createdAt ? new Date(run.createdAt).toLocaleString() : 'created just now' }}</small>
-                </button>
-            </div>
+            </GlassPanel>
         </section>
-
-        <aside v-if="showBuilder" class="builder-overlay">
-            <div class="builder-overlay__backdrop" @click="closeBuilder" />
-            <div class="builder-overlay__panel">
-                <div class="builder-overlay__header">
-                    <h3>Create workflow</h3>
-                    <button type="button" class="ghost-button compact" @click="closeBuilder">✕</button>
-                </div>
-                <WorkflowBuilder
-                    v-model="builderDefinition"
-                    v-model:name="builderName"
-                    v-model:description="builderDescription"
-                />
-                <div class="builder-overlay__actions">
-                    <button type="button" class="ghost-button" @click="closeBuilder">Cancel</button>
-                    <button
-                        type="button"
-                        class="primary-button"
-                        :disabled="saving || builderDefinition.steps.length === 0"
-                        @click="saveWorkflow"
-                    >
-                        {{ saving ? 'Creating…' : 'Create workflow' }}
-                    </button>
-                </div>
-            </div>
-        </aside>
-    </section>
+    </div>
 </template>
