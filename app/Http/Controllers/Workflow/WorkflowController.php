@@ -22,7 +22,11 @@ class WorkflowController extends Controller
         $this->authorize('viewAny', Workflow::class);
 
         $perPage = (int) $request->integer('per_page', 15);
-        abort_if($perPage > 100, 422, 'per_page cannot be greater than 100.');
+
+        validator(
+            ['per_page' => $perPage],
+            ['per_page' => ['integer', 'min:1', 'max:100']],
+        )->validate();
 
         $query = Workflow::query()
             ->with('currentVersion')

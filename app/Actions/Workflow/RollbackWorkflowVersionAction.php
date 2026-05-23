@@ -27,9 +27,9 @@ class RollbackWorkflowVersionAction
                 'created_by' => $actor->id,
             ]);
 
-            $workflow->forceFill([
+            $workflow->update([
                 'current_version_id' => $version->id,
-            ])->save();
+            ]);
 
             return $workflow->fresh(['currentVersion', 'versions']);
         });
