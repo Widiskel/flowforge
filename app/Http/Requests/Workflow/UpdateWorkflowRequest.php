@@ -10,9 +10,7 @@ class UpdateWorkflowRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        $workflow = $this->route('workflow');
-
-        return $workflow ? ($this->user()?->can('update', $workflow) ?? false) : false;
+        return true;
     }
 
     public function rules(): array

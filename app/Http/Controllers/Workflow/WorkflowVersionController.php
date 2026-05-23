@@ -45,6 +45,8 @@ class WorkflowVersionController extends Controller
             ->where('tenant_id', $request->user()->tenant_id)
             ->findOrFail($workflow);
 
+        $this->authorize('rollback', $model);
+
         $targetVersion = WorkflowVersion::query()
             ->where('tenant_id', $request->user()->tenant_id)
             ->where('workflow_id', $model->id)

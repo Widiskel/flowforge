@@ -10,9 +10,7 @@ class RollbackWorkflowRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        $workflow = $this->route('workflow');
-
-        return $workflow ? ($this->user()?->can('rollback', $workflow) ?? false) : false;
+        return true;
     }
 
     public function rules(): array

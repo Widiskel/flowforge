@@ -21,6 +21,9 @@ class WorkflowController extends Controller
     {
         $this->authorize('viewAny', Workflow::class);
 
+        $perPage = (int) $request->integer('per_page', 15);
+        abort_if($perPage > 100, 422, 'per_page cannot be greater than 100.');
+
         $query = Workflow::query()
             ->with('currentVersion')
             ->where('tenant_id', $request->user()->tenant_id)
@@ -34,17 +37,18 @@ class WorkflowController extends Controller
             $query->where('name', 'like', '%'.$request->string('search')->value().'%');
         }
 
-        $perPage = (int) $request->integer('per_page', 15);
-        abort_if($perPage > 100, 422, 'per_page cannot be greater than 100.');
-
         return WorkflowResource::collection($query->paginate($perPage));
     }
 
-    public function store(StoreWorkflowRequest $request, CreateWorkflowAction $action): WorkflowResource
+    public function store(StoreWorkflowRequest $request, CreateWorkflowAction $action): JsonResponse
     {
+        $this->authorize('create', Workflow::class);
+
         $workflow = $action->execute($request->user(), $request->validated());
 
-        return new WorkflowResource($workflow);
+        return (new WorkflowResource($workflow))
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function show(Request $request, string $workflow): WorkflowResource
@@ -64,6 +68,8 @@ class WorkflowController extends Controller
         $model = Workflow::query()
             ->where('tenant_id', $request->user()->tenant_id)
             ->findOrFail($workflow);
+
+        $this->authorize('update', $model);
 
         $workflowModel = $action->execute($request->user(), $model, $request->validated());
 
