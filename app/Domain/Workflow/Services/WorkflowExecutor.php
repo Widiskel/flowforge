@@ -110,7 +110,12 @@ class WorkflowExecutor
             $lastResult = $handler->handle($step['config'] ?? [], $context);
 
             if ($lastResult->status !== StepRunStatus::FAILED || $attempt >= $maxAttempts) {
-                break;
+                return new StepResult(
+                    $lastResult->status,
+                    $lastResult->output,
+                    $lastResult->error,
+                    $attempt,
+                );
             }
 
             $delay = $backoff === 'exponential'
@@ -124,6 +129,6 @@ class WorkflowExecutor
             usleep($delay * 1000);
         }
 
-        return $lastResult;
+        return $lastResult ?? new StepResult(StepRunStatus::FAILED, [], 'Step handler did not return a result.');
     }
 }
