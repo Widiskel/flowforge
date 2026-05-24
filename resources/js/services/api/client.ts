@@ -13,9 +13,12 @@ import type {
     RawWorkflow,
     RawWorkflowRun,
     RawWorkflowVersion,
+    RawWorkflowTrigger,
     RawExecutionLog,
     RawStepRun,
     StepRun,
+    WorkflowTrigger,
+    WorkflowTriggerType,
     WorkflowVersion,
 } from '@/types/api'
 
@@ -217,6 +220,54 @@ export async function analyzeFailure(runId: string): Promise<AiFailureAnalysis> 
     return rawToAiFailureAnalysis(response.data)
 }
 
+export async function listWorkflowTriggers(workflowId: string): Promise<WorkflowTrigger[]> {
+    const response = await request<{ data: RawWorkflowTrigger[] }>(`/api/workflows/${workflowId}/triggers`)
+    return response.data.map(rawToWorkflowTrigger)
+}
+
+export async function createWorkflowTrigger(workflowId: string, payload: {
+    type: WorkflowTriggerType
+    cron_expression?: string | null
+    timezone?: string
+    webhook_secret?: string | null
+    enabled?: boolean
+}): Promise<WorkflowTrigger> {
+    const response = await request<{ data: RawWorkflowTrigger }>(`/api/workflows/${workflowId}/triggers`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    })
+    return rawToWorkflowTrigger(response.data)
+}
+
+export async function deleteWorkflowTrigger(workflowId: string, triggerId: string): Promise<void> {
+    await request<void>(`/api/workflows/${workflowId}/triggers/${triggerId}`, {
+        method: 'DELETE',
+    })
+}
+
+export type SimulateStepResponse = {
+    status: string
+    output: unknown
+    error: string | null
+    duration_ms: number
+}
+
+/**
+ * Run a single step against the same handler stack the executor uses, with no
+ * persistence. Powers the Input/Output simulate buttons in the Node Inspector.
+ */
+export async function simulateStep(payload: {
+    type: 'HTTP' | 'DELAY' | 'CONDITION' | 'SCRIPT'
+    config: Record<string, unknown>
+    input?: Record<string, unknown>
+}): Promise<SimulateStepResponse> {
+    const response = await request<{ data: SimulateStepResponse }>('/api/workflows/simulate-step', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    })
+    return response.data
+}
+
 export function connectRunStream(runId: string, onSnapshot: (run: WorkflowRun) => void, onComplete: (status: string) => void): EventSource {
     const token = accessTokenProvider?.()
     const params = new URLSearchParams({
@@ -271,8 +322,7 @@ function rawToWorkflow(raw: RawWorkflow): Workflow {
     }
 }
 
-function rawToWorkflowVersion(raw: RawWorkflowVersion): WorkflowVersion {
-    return {
+function rawToWorkflowVersion(raw: RawWorkflowVersion): WorkflowVersion {    return {
         id: raw.id,
         versionNumber: raw.version_number,
         definition: raw.definition,
@@ -363,5 +413,20 @@ function rawToHealthMetrics(raw: RawHealthMetrics): HealthMetrics {
         },
         averageDurationMs: raw.average_duration_ms,
         p95DurationMs: raw.p95_duration_ms,
+    }
+}
+
+function rawToWorkflowTrigger(raw: RawWorkflowTrigger): WorkflowTrigger {
+    return {
+        id: raw.id,
+        workflowId: raw.workflow_id,
+        type: raw.type,
+        webhookSecret: raw.webhook_secret ?? null,
+        cronExpression: raw.cron_expression ?? null,
+        timezone: raw.timezone ?? 'UTC',
+        enabled: !!raw.enabled,
+        nextRunAt: raw.next_run_at ?? null,
+        lastRunAt: raw.last_run_at ?? null,
+        createdAt: raw.created_at ?? null,
     }
 }

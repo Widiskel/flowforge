@@ -43,7 +43,8 @@ async function submit(): Promise<void> {
 
         <GlassPanel
             radius="xl"
-            class="relative z-10 w-full max-w-md p-lg flex flex-col gap-lg shadow-2xl"
+            class="relative z-10 w-full p-lg flex flex-col gap-lg shadow-2xl"
+            style="max-width: 28rem; min-width: min(28rem, calc(100vw - 2rem));"
         >
             <div class="flex flex-col items-center gap-sm text-center">
                 <Logo :size="56" rounded="lg" class="glow-active" />
@@ -113,7 +114,7 @@ async function submit(): Promise<void> {
                 </Button>
             </form>
 
-            <div class="grid grid-cols-3 gap-sm pt-sm border-t border-outline-variant/30">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-sm pt-sm border-t border-outline-variant/30">
                 <div class="text-center">
                     <p class="text-label-caps font-label-caps text-on-surface m-0 mb-1">Admin</p>
                     <p class="text-body-sm font-body-sm text-on-surface-variant m-0">full control</p>
@@ -128,7 +129,7 @@ async function submit(): Promise<void> {
                 </div>
             </div>
 
-            <p class="text-body-sm font-body-sm text-on-surface-variant text-center m-0">
+            <p class="text-body-sm font-body-sm text-on-surface-variant text-center m-0 text-balance">
                 Demo accounts seeded by <code class="font-code-sm">DatabaseSeeder</code>. Default form is the Editor account.
             </p>
         </GlassPanel>

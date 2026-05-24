@@ -12,10 +12,10 @@ interface PaletteEntry {
 }
 
 const entries: PaletteEntry[] = [
-    { type: 'HTTP', label: 'HTTP Request', description: 'Call an external API endpoint', icon: 'language' },
-    { type: 'SCRIPT', label: 'Script', description: 'Run an allowlisted operation', icon: 'code' },
-    { type: 'DELAY', label: 'Delay', description: 'Wait for a duration', icon: 'hourglass_top' },
-    { type: 'CONDITION', label: 'Condition', description: 'Branch on an expression', icon: 'fork_right' },
+    { type: 'HTTP', label: 'HTTP Request', description: 'Call any URL — public APIs or the FlowForge playground.', icon: 'language' },
+    { type: 'SCRIPT', label: 'Server Script', description: 'Run an allowlisted server-side operation.', icon: 'code' },
+    { type: 'DELAY', label: 'Delay', description: 'Wait for a bounded duration before continuing.', icon: 'hourglass_top' },
+    { type: 'CONDITION', label: 'Condition', description: 'Branch downstream steps based on an expression.', icon: 'fork_right' },
 ]
 
 const search = ref('')

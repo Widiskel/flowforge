@@ -6,10 +6,10 @@ import type { BuilderStep } from './_shared'
 const props = defineProps<{ step: BuilderStep }>()
 
 const operations = [
-    { value: 'noop', label: 'noop', description: 'No-op success step.' },
-    { value: 'set_output', label: 'set_output', description: 'Persist a static value as the step output.' },
-    { value: 'transform', label: 'transform', description: 'Mark a deterministic transform.' },
-    { value: 'fail_demo', label: 'fail_demo', description: 'Force failure (useful for AI demo).' },
+    { value: 'noop', label: 'noop', description: 'No-op success step. Useful as a join or placeholder.' },
+    { value: 'set_output', label: 'set_output', description: 'Persist a static value as the step output for downstream steps.' },
+    { value: 'transform', label: 'transform', description: 'Mark a deterministic transform of upstream data.' },
+    { value: 'fail_demo', label: 'fail_demo', description: 'Force failure (useful to exercise retry + AI analysis).' },
 ] as const
 
 const operation = computed({
@@ -50,8 +50,18 @@ const isDemoFail = computed(() => operation.value === 'fail_demo')
 
 <template>
     <div class="flex flex-col gap-md">
+        <div class="rounded-DEFAULT bg-secondary/[0.05] border border-secondary/30 p-sm flex items-start gap-sm">
+            <Icon name="security" :size="18" class="text-secondary shrink-0 mt-0.5" />
+            <div>
+                <p class="text-body-sm font-bold text-on-surface m-0">Server-side allowlist (not user code)</p>
+                <p class="text-body-sm text-on-surface-variant m-0">
+                    Script steps execute pre-built operations registered in the FlowForge runtime. There is no facility to upload or write arbitrary PHP / shell code from the UI. To extend the allowlist, deploy a new server release.
+                </p>
+            </div>
+        </div>
+
         <div class="flex flex-col gap-1">
-            <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Operation</span>
+            <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Allowlisted operation</span>
             <div class="grid grid-cols-1 gap-1">
                 <button
                     v-for="op in operations"
@@ -82,19 +92,13 @@ const isDemoFail = computed(() => operation.value === 'fail_demo')
                 class="input-dark rounded-DEFAULT px-sm py-1.5 text-code-sm font-code-md resize-y"
                 placeholder='{ "ok": true } or plain text'
             />
+            <p class="text-body-sm text-on-surface-variant m-0">Downstream steps can read this via <code class="font-code-sm">{{ step.id }}.output</code>.</p>
         </label>
 
         <div v-if="isDemoFail" class="rounded-DEFAULT bg-failed/8 border border-failed/30 p-sm flex items-start gap-sm">
             <Icon name="report" :size="18" class="text-failed shrink-0 mt-0.5" />
             <p class="text-body-sm text-on-surface m-0">
                 <span class="text-failed font-bold">fail_demo</span> always fails — useful to exercise the AI failure analysis flow.
-            </p>
-        </div>
-
-        <div class="rounded-DEFAULT bg-surface-container-low border border-outline-variant/40 p-sm flex items-start gap-sm">
-            <Icon name="security" :size="18" class="text-secondary shrink-0 mt-0.5" />
-            <p class="text-body-sm text-on-surface-variant m-0">
-                Script steps are restricted to allowlisted operations. Arbitrary shell or PHP eval is not exposed.
             </p>
         </div>
     </div>

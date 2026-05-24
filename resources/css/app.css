@@ -133,6 +133,18 @@
     color-scheme: dark;
 }
 
+/* Override Tailwind v4 spacing tokens to match design-tokens.css */
+@theme {
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+}
+
+/* Fix max-w-md which gets overridden by --spacing-md */
+.max-w-md {
+    max-width: 28rem;
+}
+
 html {
     background: var(--color-background);
     font-family: var(--font-body-md);

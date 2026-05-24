@@ -22,14 +22,39 @@ class HttpStepHandler implements StepHandler
         $method = strtolower($config['method'] ?? 'GET');
         $timeout = (int) (($config['timeoutMs'] ?? 10000) / 1000);
         $headers = $config['headers'] ?? [];
+        $body = $config['body'] ?? null;
 
         try {
-            $response = Http::timeout($timeout)
-                ->withHeaders($headers)
-                ->{$method}($url);
+            $request = Http::timeout($timeout)->withHeaders($headers);
+
+            // Methods that carry a body get the JSON body forwarded — required
+            // by the playground POST endpoints (notify, calc, items, decisions).
+            $bodyMethods = ['post', 'put', 'patch', 'delete'];
+            if (in_array($method, $bodyMethods, true) && $body !== null) {
+                $request = $request->asJson();
+                $response = $request->{$method}($url, is_array($body) ? $body : [$body]);
+            } else {
+                $response = $request->{$method}($url);
+            }
 
             if ($response->successful()) {
-                return new StepResult(StepRunStatus::SUCCESS, ['status' => $response->status(), 'body' => $response->body()]);
+                $body = $response->body();
+                $payload = ['status' => $response->status(), 'body' => $body];
+
+                // Expose the parsed JSON when the upstream returns JSON. This
+                // lets downstream CONDITION/SCRIPT steps use `data_get` paths
+                // like `<step>.json.result` instead of trying to parse strings
+                // — required for the seeded sum-vs-diff demo and any workflow
+                // that branches on numeric upstream output.
+                $contentType = strtolower((string) $response->header('Content-Type'));
+                if (str_contains($contentType, 'json') || str_starts_with(ltrim($body), '{') || str_starts_with(ltrim($body), '[')) {
+                    $decoded = json_decode($body, true);
+                    if (is_array($decoded)) {
+                        $payload['json'] = $decoded;
+                    }
+                }
+
+                return new StepResult(StepRunStatus::SUCCESS, $payload);
             }
 
             return new StepResult(StepRunStatus::FAILED, ['status' => $response->status()], 'HTTP request failed with status '.$response->status());

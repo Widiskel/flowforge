@@ -54,4 +54,22 @@ class WorkflowTriggerController extends Controller
             ->response()
             ->setStatusCode(201);
     }
+
+    public function destroy(Request $request, string $workflow, string $trigger): JsonResponse
+    {
+        $model = Workflow::query()
+            ->where('tenant_id', $request->user()->tenant_id)
+            ->findOrFail($workflow);
+
+        $this->authorize('update', $model);
+
+        $row = WorkflowTrigger::query()
+            ->where('tenant_id', $request->user()->tenant_id)
+            ->where('workflow_id', $model->id)
+            ->findOrFail($trigger);
+
+        $row->delete();
+
+        return response()->json(status: 204);
+    }
 }
