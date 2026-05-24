@@ -217,6 +217,7 @@ function stepIcon(type?: string): string {
         case 'SCRIPT': return 'code'
         case 'DELAY': return 'hourglass_top'
         case 'CONDITION': return 'fork_right'
+        case 'LOG': return 'description'
         default: return 'workspaces'
     }
 }
@@ -228,6 +229,7 @@ function minimapNodeColor(node: Node): string {
     if (t === 'SCRIPT') return '#bcc7de'
     if (t === 'DELAY') return '#fbbf24'
     if (t === 'CONDITION') return '#38bdf8'
+    if (t === 'LOG') return '#34d399'
     return '#909097'
 }
 
@@ -254,7 +256,9 @@ function defaultConfigFor(type: StepType): Record<string, unknown> {
         case 'CONDITION':
             return { field: '', operator: 'equals', value: '' }
         case 'SCRIPT':
-            return { operation: 'noop' }
+            return { script: '' }
+        case 'LOG':
+            return { level: 'info', message: '' }
         default:
             return {}
     }
@@ -423,6 +427,11 @@ async function load(): Promise<void> {
         editingWorkflow.value = workflow
         workflowName.value = workflow.name
         workflowDescription.value = workflow.description ?? ''
+        // Hydrate initialStatus from the persisted record so the edit UI can
+        // promote a draft to active (or archive an active workflow) without a
+        // separate endpoint. Save() consumes initialStatus as the source of
+        // truth for both create and edit.
+        initialStatus.value = workflow.status
         globalTimeoutMs.value = workflow.currentVersion?.definition.globalTimeoutMs ?? 60000
         steps.value = (workflow.currentVersion?.definition.steps ?? []).map((s) => ({
             id: s.id,
@@ -503,7 +512,7 @@ async function save() {
             saved = await updateWorkflow(editingWorkflow.value.id, {
                 name: workflowName.value,
                 description: workflowDescription.value || null,
-                status: editingWorkflow.value.status,
+                status: initialStatus.value,
                 change_summary: 'Edited via builder UI',
                 definition,
             })
@@ -634,7 +643,7 @@ async function testRun() {
             const updated = await updateWorkflow(workflowId, {
                 name: workflowName.value,
                 description: workflowDescription.value || null,
-                status: editingWorkflow.value!.status,
+                status: initialStatus.value,
                 change_summary: 'Test run from builder',
                 definition,
             })
@@ -673,8 +682,10 @@ async function testRun() {
 
 /**
  * Poll the run + its logs until it reaches a terminal status. We use polling
- * (not SSE) here because the builder modal is short-lived and the executor is
- * synchronous — most test runs finish before the first tick.
+ * (not SSE) here because the builder modal is short-lived. With the queued
+ * executor the run starts in PENDING/RUNNING and only flips to a terminal
+ * state after the worker finishes — the modal renders a loading state for
+ * the timeline + logs while we wait for that flip.
  */
 function startTestRunPolling(runId: string) {
     stopTestRunPolling()
@@ -688,7 +699,7 @@ function startTestRunPolling(runId: string) {
             const terminal = ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED', 'SKIPPED'].includes(run.status)
             testRunModal.value = { ...run, logs: logs.data }
             if (!terminal) {
-                testRunPollHandle.value = window.setTimeout(tick, 1000)
+                testRunPollHandle.value = window.setTimeout(tick, 750)
             } else {
                 testRunPollHandle.value = null
             }
@@ -697,7 +708,11 @@ function startTestRunPolling(runId: string) {
             testRunPollHandle.value = window.setTimeout(tick, 2000)
         }
     }
-    testRunPollHandle.value = window.setTimeout(tick, 200)
+    // Kick the first poll immediately so the modal flips out of the loading
+    // state as soon as the worker writes step rows or log entries — without
+    // this the user stares at the loader for a beat even when the run already
+    // succeeded between the trigger response and the first tick.
+    testRunPollHandle.value = window.setTimeout(tick, 0)
 }
 
 function stopTestRunPolling() {
@@ -765,6 +780,14 @@ onBeforeUnmount(stopTestRunPolling)
             <div class="builder-topbar__center">
                 <h1 class="builder-topbar__title" :title="workflowName || 'Untitled workflow'">{{ workflowName || 'Untitled workflow' }}</h1>
                 <Badge :tone="modeBadge.tone">{{ modeBadge.label }}</Badge>
+                <label v-if="!isReadOnly" class="builder-topbar__status" title="Workflow status — applies on next save">
+                    <span class="builder-topbar__status-label">Status</span>
+                    <select v-model="initialStatus" class="builder-topbar__status-select">
+                        <option value="draft">Draft</option>
+                        <option value="active">Active</option>
+                        <option value="archived">Archived</option>
+                    </select>
+                </label>
             </div>
 
             <div class="builder-topbar__right">
@@ -1079,6 +1102,52 @@ onBeforeUnmount(stopTestRunPolling)
     color: color-mix(in srgb, var(--color-on-surface-variant) 50%, transparent);
 }
 
+.builder-topbar__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px 4px 10px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--color-surface-container-high) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-outline-variant) 50%, transparent);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    flex-shrink: 0;
+}
+
+.builder-topbar__status:hover {
+    border-color: color-mix(in srgb, var(--color-secondary) 50%, transparent);
+    background: color-mix(in srgb, var(--color-secondary) 8%, transparent);
+}
+
+.builder-topbar__status-label {
+    font-family: var(--font-code-md);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--color-on-surface-variant);
+    text-transform: uppercase;
+}
+
+.builder-topbar__status-select {
+    background: transparent;
+    border: 0;
+    color: var(--color-on-surface);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    outline: none;
+    cursor: pointer;
+    padding: 0;
+}
+
+.builder-topbar__status-select option {
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
+    font-weight: 600;
+}
+
 .builder-topbar__right {
     display: flex;
     align-items: center;
@@ -1283,11 +1352,17 @@ onBeforeUnmount(stopTestRunPolling)
     top: 16px;
     bottom: 16px;
     z-index: 20;
-    width: 320px;
+    width: 360px;
     max-width: calc(60vw - 80px);
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     border-radius: var(--radius-xl);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.builder-inspector-rail > * {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 /* Vue Flow plugin chrome */
@@ -1501,6 +1576,14 @@ onBeforeUnmount(stopTestRunPolling)
 
 .flow-node.tone-condition {
     border-left: 3px solid var(--color-running);
+}
+
+.flow-node.tone-log {
+    border-left: 3px solid var(--color-success);
+}
+.flow-node.tone-log .flow-node__icon {
+    background: color-mix(in srgb, var(--color-success) 14%, transparent);
+    color: var(--color-success);
 }
 
 /* Trigger node — flowchart "terminator" (stadium / pill).

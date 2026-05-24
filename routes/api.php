@@ -76,7 +76,9 @@ Route::middleware('throttle:playground')->prefix('playground')->group(function (
     // Decision sandbox.
     Route::post('/decisions/{verdict}', [PlaygroundController::class, 'decision']);
 
-    // Mock CRUD.
+    // DB-backed CRUD against `playground_items`. Real Eloquent persistence
+    // so demo workflows can exercise mutation end-to-end. Self-cleaning
+    // (capped at 100 rows total via auto-prune).
     Route::get('/items', [PlaygroundController::class, 'listItems']);
     Route::post('/items', [PlaygroundController::class, 'createItem']);
     Route::get('/items/{id}', [PlaygroundController::class, 'showItem']);

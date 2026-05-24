@@ -4,8 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\Workflow;
 
-use App\Domain\Workflow\Services\WorkflowExecutor;
-use App\Domain\Workflow\Services\WorkflowRunPersister;
+use App\Jobs\ExecuteWorkflowRun;
 use App\Models\User;
 use App\Models\Workflow;
 use App\Models\WorkflowRun;
@@ -14,11 +13,14 @@ use RuntimeException;
 
 class TriggerWorkflowAction
 {
-    public function __construct(
-        private readonly WorkflowExecutor $executor,
-        private readonly WorkflowRunPersister $persister,
-    ) {}
-
+    /**
+     * Create a `PENDING` run row, dispatch the executor as a queued job, and
+     * return the run record. Sync queue connection (used in tests) runs the
+     * job inline so the returned record already reflects terminal state;
+     * database/redis queue connections (production + dev) hand off to a
+     * worker so the trigger HTTP request returns fast and the executor's
+     * loopback HTTP steps don't deadlock the dev server.
+     */
     public function execute(User $actor, Workflow $workflow, array $input = []): WorkflowRun
     {
         $version = $workflow->currentVersion;
@@ -39,8 +41,8 @@ class TriggerWorkflowAction
             ]);
         });
 
-        $result = $this->executor->execute($version->definition);
+        ExecuteWorkflowRun::dispatch($run->id);
 
-        return $this->persister->persist($run, $version->definition, $result);
+        return $run->refresh();
     }
 }

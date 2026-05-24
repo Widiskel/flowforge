@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Workflow;
 use App\Domain\Workflow\Handlers\ConditionStepHandler;
 use App\Domain\Workflow\Handlers\DelayStepHandler;
 use App\Domain\Workflow\Handlers\HttpStepHandler;
+use App\Domain\Workflow\Handlers\LogStepHandler;
 use App\Domain\Workflow\Handlers\ScriptStepHandler;
 use App\Domain\Workflow\Handlers\StepHandler;
 use App\Http\Controllers\Controller;
@@ -29,12 +30,13 @@ class SimulateStepController extends Controller
         'DELAY' => DelayStepHandler::class,
         'CONDITION' => ConditionStepHandler::class,
         'SCRIPT' => ScriptStepHandler::class,
+        'LOG' => LogStepHandler::class,
     ];
 
     public function __invoke(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'type' => ['required', 'string', 'in:HTTP,DELAY,CONDITION,SCRIPT'],
+            'type' => ['required', 'string', 'in:HTTP,DELAY,CONDITION,SCRIPT,LOG'],
             'config' => ['nullable', 'array'],
             'input' => ['nullable', 'array'],
         ]);

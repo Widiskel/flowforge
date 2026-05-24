@@ -144,8 +144,8 @@ class WorkflowCrudTest extends TestCase
 
         $cyclic = $this->validDefinition;
         $cyclic['steps'] = [
-            ['id' => 'a', 'type' => 'SCRIPT', 'name' => 'A', 'dependsOn' => ['b'], 'config' => ['operation' => 'noop']],
-            ['id' => 'b', 'type' => 'SCRIPT', 'name' => 'B', 'dependsOn' => ['a'], 'config' => ['operation' => 'noop']],
+            ['id' => 'a', 'type' => 'SCRIPT', 'name' => 'A', 'dependsOn' => ['b'], 'config' => ['script' => 'return null;']],
+            ['id' => 'b', 'type' => 'SCRIPT', 'name' => 'B', 'dependsOn' => ['a'], 'config' => ['script' => 'return null;']],
         ];
 
         $response = $this->postJson('/api/workflows', [

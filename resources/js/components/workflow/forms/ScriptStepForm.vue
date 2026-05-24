@@ -1,51 +1,45 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
+import Button from '@/components/ui/Button.vue'
+import CodeEditor from '@/components/ui/CodeEditor.vue'
 import type { BuilderStep } from './_shared'
 
 const props = defineProps<{ step: BuilderStep }>()
 
-const operations = [
-    { value: 'noop', label: 'noop', description: 'No-op success step. Useful as a join or placeholder.' },
-    { value: 'set_output', label: 'set_output', description: 'Persist a static value as the step output for downstream steps.' },
-    { value: 'transform', label: 'transform', description: 'Mark a deterministic transform of upstream data.' },
-    { value: 'fail_demo', label: 'fail_demo', description: 'Force failure (useful to exercise retry + AI analysis).' },
-] as const
+const SCRIPT_TEMPLATE = `// Available globals:
+//   $doc.input    upstream context, keyed by step id
+//   $doc.config   this step's config
+//   $doc.output   write the step output here, or use return
+//   fetch(url, opts), URL, URLSearchParams, console.log/.warn/.error
+//
+// Example: shape an output from an upstream HTTP step.
+const user = $doc.input.fetch_user?.json ?? {};
+return {
+    userId: user.id,
+    userName: user.name,
+    summary: \`User \${user.id} loaded\`,
+};
+`
 
-const operation = computed({
-    get: () => String(props.step.config.operation ?? 'noop'),
-    set: (value: string) => {
-        props.step.config.operation = value
-    },
-})
-
-const outputJson = computed({
+const scriptValue = computed({
     get: () => {
-        const raw = props.step.config.output
-        if (raw === undefined || raw === null) return ''
-        if (typeof raw === 'string') return raw
-        try {
-            return JSON.stringify(raw, null, 2)
-        } catch {
-            return ''
-        }
+        const raw = props.step.config.script
+        return typeof raw === 'string' ? raw : ''
     },
     set: (value: string) => {
-        const trimmed = value.trim()
-        if (!trimmed) {
-            delete props.step.config.output
+        if (value === '') {
+            delete props.step.config.script
             return
         }
-        try {
-            props.step.config.output = JSON.parse(trimmed)
-        } catch {
-            props.step.config.output = value
-        }
+        props.step.config.script = value
     },
 })
 
-const showOutput = computed(() => operation.value === 'set_output')
-const isDemoFail = computed(() => operation.value === 'fail_demo')
+function fillTemplate() {
+    if (scriptValue.value.trim() !== '') return
+    scriptValue.value = SCRIPT_TEMPLATE
+}
 </script>
 
 <template>
@@ -53,53 +47,44 @@ const isDemoFail = computed(() => operation.value === 'fail_demo')
         <div class="rounded-DEFAULT bg-secondary/[0.05] border border-secondary/30 p-sm flex items-start gap-sm">
             <Icon name="security" :size="18" class="text-secondary shrink-0 mt-0.5" />
             <div>
-                <p class="text-body-sm font-bold text-on-surface m-0">Server-side allowlist (not user code)</p>
+                <p class="text-body-sm font-bold text-on-surface m-0">Sandboxed JavaScript</p>
                 <p class="text-body-sm text-on-surface-variant m-0">
-                    Script steps execute pre-built operations registered in the FlowForge runtime. There is no facility to upload or write arbitrary PHP / shell code from the UI. To extend the allowlist, deploy a new server release.
+                    Runs in a Node 18 child process with no filesystem, child_process, or low-level
+                    network modules. <code class="font-code-sm">fetch</code> is available so you can
+                    call other APIs; <code class="font-code-sm">console.log</code> output gets
+                    captured into the step's <code class="font-code-sm">logs</code>.
                 </p>
             </div>
         </div>
 
-        <div class="flex flex-col gap-1">
-            <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Allowlisted operation</span>
-            <div class="grid grid-cols-1 gap-1">
-                <button
-                    v-for="op in operations"
-                    :key="op.value"
-                    type="button"
-                    :class="[
-                        'flex items-start gap-sm p-sm rounded-DEFAULT border text-left transition-colors',
-                        operation === op.value
-                            ? 'border-secondary/60 bg-secondary/[0.06]'
-                            : 'border-outline-variant/40 bg-surface-container-low hover:border-secondary/30 hover:bg-secondary/[0.03]',
-                    ]"
-                    @click="operation = op.value"
-                >
-                    <span :class="['mt-0.5 w-3 h-3 rounded-full border-2 shrink-0', operation === op.value ? 'border-secondary bg-secondary' : 'border-outline-variant']" />
-                    <span class="flex flex-col gap-0.5 min-w-0">
-                        <span class="text-code-md font-code-md font-bold text-on-surface">{{ op.label }}</span>
-                        <span class="text-body-sm text-on-surface-variant">{{ op.description }}</span>
-                    </span>
-                </button>
+        <div class="flex flex-col gap-sm">
+            <div class="flex items-start justify-between gap-sm">
+                <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Inline script</span>
+                <Button size="sm" variant="ghost" leading-icon="auto_awesome" @click="fillTemplate">Insert template</Button>
             </div>
-        </div>
 
-        <label v-if="showOutput" class="flex flex-col gap-1">
-            <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Output value</span>
-            <textarea
-                v-model="outputJson"
-                rows="4"
-                class="input-dark rounded-DEFAULT px-sm py-1.5 text-code-sm font-code-md resize-y"
-                placeholder='{ "ok": true } or plain text'
+            <CodeEditor
+                v-model="scriptValue"
+                :placeholder="SCRIPT_TEMPLATE"
+                min-height="240px"
+                max-height="440px"
             />
-            <p class="text-body-sm text-on-surface-variant m-0">Downstream steps can read this via <code class="font-code-sm">{{ step.id }}.output</code>.</p>
-        </label>
-
-        <div v-if="isDemoFail" class="rounded-DEFAULT bg-failed/8 border border-failed/30 p-sm flex items-start gap-sm">
-            <Icon name="report" :size="18" class="text-failed shrink-0 mt-0.5" />
-            <p class="text-body-sm text-on-surface m-0">
-                <span class="text-failed font-bold">fail_demo</span> always fails — useful to exercise the AI failure analysis flow.
-            </p>
         </div>
+
+        <div class="rounded-DEFAULT border border-outline-variant/40 bg-surface-container-low p-sm flex flex-col gap-1">
+            <p class="text-label-caps font-label-caps text-on-surface-variant uppercase m-0">Predefined globals</p>
+            <ul class="m-0 pl-md text-body-sm text-on-surface-variant flex flex-col gap-0.5">
+                <li><code class="font-code-sm text-on-surface">$doc.input</code> — context output of upstream nodes, keyed by step id.</li>
+                <li><code class="font-code-sm text-on-surface">$doc.config</code> — this step's own config (sans <code class="font-code-sm">script</code>).</li>
+                <li><code class="font-code-sm text-on-surface">$doc.output</code> — write here, or <code class="font-code-sm">return</code> a value from the script.</li>
+                <li><code class="font-code-sm text-on-surface">fetch</code>, <code class="font-code-sm text-on-surface">URL</code>, <code class="font-code-sm text-on-surface">URLSearchParams</code> — outbound HTTP via Node 18 fetch.</li>
+                <li><code class="font-code-sm text-on-surface">console.log/.warn/.error</code> — captured into <code class="font-code-sm">{{ step.id }}.output.logs</code>.</li>
+            </ul>
+        </div>
+
+        <p class="text-body-sm text-on-surface-variant m-0">
+            Hard limits: 8s wall-clock, 16 KB script length. Scripts that produce no stdout, return non-JSON,
+            or throw fail the step with the captured error message.
+        </p>
     </div>
 </template>

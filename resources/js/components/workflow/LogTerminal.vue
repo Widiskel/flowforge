@@ -31,7 +31,10 @@ const lines = computed(() => props.logs ?? [])
     <div
         class="bg-[#02080f] border border-outline-variant/30 rounded-DEFAULT font-code-md text-code-md text-on-surface overflow-y-auto max-h-[480px]"
     >
-        <div v-if="loading" class="p-md text-on-surface-variant">Loading logs…</div>
+        <div v-if="loading" class="p-md text-on-surface-variant flex items-center gap-sm">
+            <span class="log-loader" aria-hidden="true" />
+            Streaming logs from the worker…
+        </div>
         <div v-else-if="lines.length === 0" class="p-md text-on-surface-variant">No logs available for this run.</div>
         <div v-else class="p-md flex flex-col gap-1">
             <div
@@ -46,3 +49,19 @@ const lines = computed(() => props.logs ?? [])
         </div>
     </div>
 </template>
+
+<style scoped>
+.log-loader {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    border: 2px solid color-mix(in srgb, var(--color-outline-variant) 60%, transparent);
+    border-top-color: var(--color-secondary);
+    animation: log-loader-spin 0.8s linear infinite;
+}
+
+@keyframes log-loader-spin {
+    to { transform: rotate(360deg); }
+}
+</style>

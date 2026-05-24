@@ -49,12 +49,16 @@ class WorkflowRun extends Model
 
     public function stepRuns(): HasMany
     {
-        return $this->hasMany(WorkflowStepRun::class);
+        // Order by id (UUIDv7 is timestamp-prefixed) so the executor's
+        // insertion sequence — which mirrors the workflow's topological
+        // execution order — is preserved when the resource layer hydrates
+        // the relation.
+        return $this->hasMany(WorkflowStepRun::class)->orderBy('id');
     }
 
     public function logs(): HasMany
     {
-        return $this->hasMany(ExecutionLog::class);
+        return $this->hasMany(ExecutionLog::class)->orderBy('created_at')->orderBy('id');
     }
 
     public function aiAuditLogs(): HasMany

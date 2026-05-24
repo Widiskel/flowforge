@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import GlassPanel from '@/components/ui/GlassPanel.vue'
 import PageHeader from '@/components/ui/PageHeader.vue'
@@ -11,7 +11,7 @@ import Tabs from '@/components/ui/Tabs.vue'
 import StatusBadge from '@/components/workflow/StatusBadge.vue'
 import StepTimeline from '@/components/workflow/StepTimeline.vue'
 import LogTerminal from '@/components/workflow/LogTerminal.vue'
-import { workflows, allWorkflowRuns, runLogs, analyzeFailure } from '@/services/api/client'
+import { workflows, allWorkflowRuns, workflowRun as fetchWorkflowRun, runLogs, analyzeFailure } from '@/services/api/client'
 import type {
     AiFailureAnalysis,
     ExecutionLog,
@@ -34,7 +34,72 @@ const analysis = ref<AiFailureAnalysis | null>(null)
 const analysisLoading = ref(false)
 const analysisError = ref<string | null>(null)
 
-const selectedRun = computed(() => runs.value.find((r) => r.id === selectedRunId.value) ?? null)
+/**
+ * Selected run "detail" — same id as one entry in `runs`, but with stepRuns
+ * eagerly loaded. The list payload deliberately doesn't carry step rows
+ * (cheaper paginated response), so we fetch the detail separately whenever
+ * the user picks a run, and keep polling while it's still in flight.
+ */
+const selectedRunDetail = ref<WorkflowRun | null>(null)
+const detailLoading = ref(false)
+const pollHandle = ref<number | null>(null)
+
+const selectedRun = computed<WorkflowRun | null>(() => {
+    // Prefer the detail when its id matches the selection — otherwise fall
+    // back to the list row so we still render something while the detail is
+    // loading on first selection.
+    if (selectedRunDetail.value && selectedRunDetail.value.id === selectedRunId.value) {
+        return selectedRunDetail.value
+    }
+    return runs.value.find((r) => r.id === selectedRunId.value) ?? null
+})
+
+function isTerminal(status: string | undefined): boolean {
+    return ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED', 'SKIPPED'].includes(status ?? '')
+}
+
+function stopPolling(): void {
+    if (pollHandle.value !== null) {
+        clearTimeout(pollHandle.value)
+        pollHandle.value = null
+    }
+}
+
+async function fetchSelectedRunDetail(): Promise<void> {
+    if (!selectedRunId.value) return
+    const targetId = selectedRunId.value
+    try {
+        const [run, logResponse] = await Promise.all([
+            fetchWorkflowRun(targetId),
+            runLogs(targetId),
+        ])
+        // The user may have flipped to another run while the request was in
+        // flight; bail if so to avoid stomping the new selection.
+        if (selectedRunId.value !== targetId) return
+        selectedRunDetail.value = run
+        logs.value = logResponse.data
+        // Mirror the freshest status into the list row so the sidebar reflects
+        // realtime progress without needing another full list reload.
+        const idx = runs.value.findIndex((r) => r.id === run.id)
+        if (idx !== -1) {
+            runs.value[idx] = { ...runs.value[idx], ...run, stepRuns: undefined, logs: undefined }
+        }
+    } catch {
+        if (selectedRunId.value === targetId) {
+            logs.value = []
+        }
+    }
+}
+
+async function pollSelectedRun(): Promise<void> {
+    if (!selectedRunId.value) return
+    await fetchSelectedRunDetail()
+    if (selectedRunDetail.value && !isTerminal(selectedRunDetail.value.status)) {
+        pollHandle.value = window.setTimeout(pollSelectedRun, 1000)
+    } else {
+        pollHandle.value = null
+    }
+}
 
 const selectedWorkflowName = computed(() => {
     if (!selectedRun.value) return 'Unknown'
@@ -56,19 +121,31 @@ const tabItems = computed(() => [
 ])
 
 watch(selectedRunId, async (id) => {
-    if (!id) return
-    logsLoading.value = true
+    stopPolling()
+    selectedRunDetail.value = null
+    logs.value = []
     analysis.value = null
     analysisError.value = null
+    if (!id) return
+
+    logsLoading.value = true
     try {
-        const response = await runLogs(id)
-        logs.value = response.data
-    } catch {
-        logs.value = []
+        await fetchSelectedRunDetail()
+        // If this run is still in flight (e.g. the user clicked into it
+        // straight from the wizard), start polling until it settles.
+        // Cast through `unknown` because TS narrows the ref's value type to
+        // `null` after the explicit null assignment a few lines up; the await
+        // doesn't reset narrowing.
+        const detail = selectedRunDetail.value as unknown as WorkflowRun | null
+        if (detail && !isTerminal(detail.status)) {
+            pollHandle.value = window.setTimeout(pollSelectedRun, 1000)
+        }
     } finally {
         logsLoading.value = false
     }
 })
+
+onBeforeUnmount(stopPolling)
 
 async function requestAnalysis(): Promise<void> {
     if (!selectedRunId.value) return
@@ -97,6 +174,17 @@ async function loadRuns(): Promise<void> {
         } else if (runs.value.length > 0 && !selectedRunId.value) {
             selectedRunId.value = runs.value[0].id
         }
+
+        // If the route landed us on a run that's still running (typical when
+        // the user just hit Test Run and we redirected here), refresh the
+        // detail and start polling so the UI flips to terminal automatically.
+        if (selectedRunId.value) {
+            await fetchSelectedRunDetail()
+            if (selectedRunDetail.value && !isTerminal(selectedRunDetail.value.status)) {
+                stopPolling()
+                pollHandle.value = window.setTimeout(pollSelectedRun, 1000)
+            }
+        }
     } catch (err) {
         error.value = err instanceof Error ? err.message : 'Failed to load runs'
     } finally {
@@ -117,7 +205,11 @@ function statusAccent(status: string): string {
     }
 }
 
-const stepsWithOutput = computed(() => (selectedRun.value?.stepRuns ?? []).filter((s) => s.output))
+const stepsWithOutput = computed(() => (selectedRun.value?.stepRuns ?? []).filter((s) => {
+    if (s.output === null || s.output === undefined) return false
+    if (typeof s.output === 'object' && !Array.isArray(s.output) && Object.keys(s.output as Record<string, unknown>).length === 0) return false
+    return true
+}))
 
 onMounted(loadRuns)
 </script>

@@ -13,5 +13,6 @@ readonly class StepResult
         public array $output = [],
         public ?string $error = null,
         public int $attemptCount = 1,
+        public int $durationMs = 0,
     ) {}
 }

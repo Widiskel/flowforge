@@ -14,7 +14,7 @@ defineEmits<{ (e: 'update:modelValue', value: T): void }>()
 <template>
     <div
         :class="[
-            'flex items-end gap-1',
+            'flex items-end gap-1 overflow-x-auto whitespace-nowrap tabs-scroll',
             underline ? 'border-b border-outline-variant/30' : '',
         ]"
     >
@@ -23,7 +23,7 @@ defineEmits<{ (e: 'update:modelValue', value: T): void }>()
             :key="tab.value"
             type="button"
             :class="[
-                'px-md py-sm text-body-sm font-bold transition-all duration-150 inline-flex items-center gap-sm',
+                'px-md py-sm text-body-sm font-bold transition-all duration-150 inline-flex items-center gap-sm shrink-0',
                 modelValue === tab.value
                     ? 'text-secondary border-b-2 border-secondary -mb-px'
                     : 'text-on-surface-variant hover:text-on-surface border-b-2 border-transparent -mb-px',
@@ -38,3 +38,19 @@ defineEmits<{ (e: 'update:modelValue', value: T): void }>()
         </button>
     </div>
 </template>
+
+<style scoped>
+/* Slim, theme-friendly horizontal scrollbar so the Tabs row degrades nicely
+   inside narrow rails like the inspector panel. */
+.tabs-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-outline-variant) 60%, transparent) transparent;
+}
+.tabs-scroll::-webkit-scrollbar {
+    height: 4px;
+}
+.tabs-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-outline-variant) 60%, transparent);
+    border-radius: 9999px;
+}
+</style>

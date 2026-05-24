@@ -8,7 +8,7 @@ use App\Domain\Workflow\Exceptions\InvalidWorkflowDefinitionException;
 
 class DagValidator
 {
-    private const ALLOWED_TYPES = ['HTTP', 'DELAY', 'CONDITION', 'SCRIPT'];
+    private const ALLOWED_TYPES = ['HTTP', 'DELAY', 'CONDITION', 'SCRIPT', 'LOG'];
 
     private const MIN_GLOBAL_TIMEOUT_MS = 1000;
 

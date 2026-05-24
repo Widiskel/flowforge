@@ -5,26 +5,28 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Playground;
 
 use App\Http\Controllers\Controller;
+use App\Models\PlaygroundItem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 /**
  * Public, no-auth playground endpoints used by demo workflows and as a sandbox
- * for user-authored HTTP steps. Every endpoint is deterministic-ish and safe;
- * none of them touch business data.
+ * for user-authored HTTP steps. The handlers fall into five buckets:
  *
- * The handlers fall into four buckets:
- *  - Diagnostics (echo, status, maybe-fail, delay)
- *  - Profile lookup (users/{id}, metrics)
- *  - Pure math sandbox (calc/sum, calc/diff, calc/multiply) — drives the
- *    "compare process A vs process B" demo workflow
- *  - Decision sandbox (decisions/approve, decisions/reject) — drives the
- *    auto-approve workflows
- *  - Mock CRUD (items/* + inventory) — drives the CRUD demo workflows
+ *  - Diagnostics (echo, status, maybe-fail, delay) — stateless utilities.
+ *  - Profile lookup (users/{id}, metrics) — synthetic, deterministic.
+ *  - Pure-math sandbox (calc/{op}) — drives "compare A vs B" demos.
+ *  - Decision sandbox (decisions/{verdict}) — drives auto-approve demos.
+ *  - DB-backed CRUD (items/*) — real `playground_items` rows so workflow
+ *    authors can exercise mutation end-to-end. Capped at 100 rows via
+ *    auto-prune on every list/create call so the table stays small.
  */
 class PlaygroundController extends Controller
 {
+    private const MAX_ROWS = 100;
+
     public function echo(Request $request): JsonResponse
     {
         return response()->json([
@@ -177,7 +179,7 @@ class PlaygroundController extends Controller
             'op' => strtolower($op),
             'a' => $a,
             'b' => $b,
-            'result' => $result + 0, // ensure numeric (not string) in JSON
+            'result' => $result + 0,
         ]);
     }
 
@@ -211,114 +213,179 @@ class PlaygroundController extends Controller
         ]);
     }
 
-    /**
-     * Mock CRUD: items collection. POST creates a synthetic item, GET returns
-     * a deterministic sample list. Used by the "auto CRUD" demo workflow.
-     */
-    public function listItems(): JsonResponse
+    // ------------------------------------------------------------------
+    // DB-backed CRUD against `playground_items`. Real Eloquent persistence so
+    // workflow authors can demo write paths end-to-end. Self-cleaning.
+    // ------------------------------------------------------------------
+
+    public function listItems(Request $request): JsonResponse
     {
-        $items = [];
-        foreach (range(1, 5) as $i) {
-            $items[] = [
-                'id' => $i,
-                'sku' => 'SKU-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
-                'name' => 'Demo widget #'.$i,
-                'stock' => mt_rand(0, 80),
-                'unit_price' => round(mt_rand(500, 2500) / 100, 2),
-                'updated_at' => now()->subMinutes(mt_rand(0, 600))->toIso8601String(),
-            ];
+        $this->pruneStaleRows();
+
+        $perPage = max(1, min(50, (int) $request->query('per_page', 10)));
+        $items = PlaygroundItem::query()
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
+
+        return response()->json([
+            'service' => 'flowforge-playground',
+            'data' => $items->items(),
+            'meta' => [
+                'total' => $items->total(),
+                'per_page' => $items->perPage(),
+                'current_page' => $items->currentPage(),
+                'last_page' => $items->lastPage(),
+            ],
+        ]);
+    }
+
+    public function showItem(string $id): JsonResponse
+    {
+        $item = PlaygroundItem::query()->find($id);
+
+        if (! $item) {
+            return response()->json([
+                'service' => 'flowforge-playground',
+                'error' => 'not_found',
+                'item_id' => $id,
+            ], 404);
         }
 
         return response()->json([
             'service' => 'flowforge-playground',
-            'items' => $items,
-            'count' => count($items),
+            'data' => $item,
         ]);
     }
 
     public function createItem(Request $request): JsonResponse
     {
-        $name = trim((string) $request->input('name', ''));
-        $stock = (int) $request->input('stock', 0);
-        $price = (float) $request->input('unit_price', 0);
+        $this->pruneStaleRows();
 
-        if ($name === '' || $stock < 0 || $price < 0) {
-            return response()->json([
-                'service' => 'flowforge-playground',
-                'error' => 'invalid_payload',
-                'message' => '`name` is required, `stock` and `unit_price` must be non-negative.',
-            ], 422);
-        }
+        $payload = $request->isJson() ? $request->json()->all() : $request->all();
+
+        $validated = Validator::make($payload, [
+            'name' => ['required', 'string', 'max:120'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'quantity' => ['nullable', 'integer', 'min:0', 'max:1000000'],
+            'price_cents' => ['nullable', 'integer', 'min:0', 'max:1000000000'],
+            'metadata' => ['nullable', 'array'],
+        ])->validate();
+
+        $item = PlaygroundItem::query()->create([
+            'name' => $validated['name'],
+            'description' => $validated['description'] ?? null,
+            'quantity' => $validated['quantity'] ?? 0,
+            'price_cents' => $validated['price_cents'] ?? 0,
+            'metadata' => $validated['metadata'] ?? null,
+        ]);
 
         return response()->json([
             'service' => 'flowforge-playground',
-            'item' => [
-                'id' => mt_rand(1000, 9999),
-                'sku' => 'SKU-'.strtoupper(Str::random(6)),
-                'name' => $name,
-                'stock' => $stock,
-                'unit_price' => $price,
-                'created_at' => now()->toIso8601String(),
-            ],
+            'data' => $item->fresh(),
         ], 201);
     }
 
-    public function showItem(int $id): JsonResponse
+    public function updateItem(Request $request, string $id): JsonResponse
     {
+        $item = PlaygroundItem::query()->find($id);
+
+        if (! $item) {
+            return response()->json([
+                'service' => 'flowforge-playground',
+                'error' => 'not_found',
+                'item_id' => $id,
+            ], 404);
+        }
+
+        $payload = $request->isJson() ? $request->json()->all() : $request->all();
+
+        $validated = Validator::make($payload, [
+            'name' => ['sometimes', 'string', 'max:120'],
+            'description' => ['sometimes', 'nullable', 'string', 'max:500'],
+            'quantity' => ['sometimes', 'integer', 'min:0', 'max:1000000'],
+            'price_cents' => ['sometimes', 'integer', 'min:0', 'max:1000000000'],
+            'metadata' => ['sometimes', 'nullable', 'array'],
+        ])->validate();
+
+        $item->fill($validated)->save();
+
         return response()->json([
             'service' => 'flowforge-playground',
-            'item' => [
-                'id' => $id,
-                'sku' => 'SKU-'.str_pad((string) $id, 4, '0', STR_PAD_LEFT),
-                'name' => 'Demo widget #'.$id,
-                'stock' => max(0, ($id * 7) % 90),
-                'unit_price' => round(($id * 1.37) + 4.99, 2),
-                'fetched_at' => now()->toIso8601String(),
-            ],
+            'data' => $item->fresh(),
         ]);
     }
 
-    public function updateItem(Request $request, int $id): JsonResponse
+    public function deleteItem(string $id): JsonResponse
     {
-        $patch = array_intersect_key(
-            $request->all(),
-            array_flip(['name', 'stock', 'unit_price']),
-        );
+        $item = PlaygroundItem::query()->find($id);
+
+        if (! $item) {
+            return response()->json([
+                'service' => 'flowforge-playground',
+                'error' => 'not_found',
+                'item_id' => $id,
+            ], 404);
+        }
+
+        $item->delete();
 
         return response()->json([
             'service' => 'flowforge-playground',
-            'item' => array_merge([
-                'id' => $id,
-                'sku' => 'SKU-'.str_pad((string) $id, 4, '0', STR_PAD_LEFT),
-                'updated_at' => now()->toIso8601String(),
-            ], $patch),
-            'fields_changed' => array_keys($patch),
+            'deleted' => true,
+            'id' => $id,
         ]);
     }
 
-    public function deleteItem(int $id): JsonResponse
-    {
-        return response()->json([
-            'service' => 'flowforge-playground',
-            'deleted_id' => $id,
-            'deleted_at' => now()->toIso8601String(),
-        ]);
-    }
-
+    /**
+     * Aggregate snapshot over `playground_items`. Returns a real-time
+     * inventory summary (total items, low-stock count, total value) the
+     * "auto CRUD" demo workflows can react to via CONDITION steps.
+     */
     public function inventoryReport(): JsonResponse
     {
-        $low = mt_rand(0, 6);
-        $total = mt_rand(40, 220);
+        $this->pruneStaleRows();
+
+        $rows = PlaygroundItem::query()->get(['quantity', 'price_cents']);
+        $totalItems = $rows->count();
+        $totalQuantity = (int) $rows->sum('quantity');
+        $totalValueCents = (int) $rows->sum(fn ($r) => $r->quantity * $r->price_cents);
+        $lowStock = $rows->where('quantity', '<', 5)->count();
 
         return response()->json([
             'service' => 'flowforge-playground',
             'inventory' => [
-                'total_items' => $total,
-                'low_stock_items' => $low,
-                'reorder_required' => $low > 2,
+                'total_items' => $totalItems,
+                'total_quantity' => $totalQuantity,
+                'total_value_cents' => $totalValueCents,
+                'low_stock_items' => $lowStock,
+                'reorder_required' => $lowStock > 2,
                 'as_of' => now()->toIso8601String(),
             ],
         ]);
+    }
+
+    /**
+     * Keep the playground table from growing unbounded by trimming the oldest
+     * rows whenever we cross MAX_ROWS. Cheap, runs on every CRUD request that
+     * adds or lists items. Intentionally not a scheduled job — the data is
+     * throwaway demo data.
+     */
+    private function pruneStaleRows(): void
+    {
+        $count = PlaygroundItem::query()->count();
+        if ($count <= self::MAX_ROWS) {
+            return;
+        }
+
+        $excess = $count - self::MAX_ROWS;
+        $oldestIds = PlaygroundItem::query()
+            ->orderBy('created_at')
+            ->limit($excess)
+            ->pluck('id');
+
+        if ($oldestIds->isNotEmpty()) {
+            PlaygroundItem::query()->whereIn('id', $oldestIds)->delete();
+        }
     }
 
     /**

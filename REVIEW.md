@@ -391,3 +391,57 @@ Verifikasi setelah fix:
 
 Putusan: OK merge.
 
+
+
+## PR #18 — docs + db: covering index, README final pass
+
+- Branch: `feature/final-polish`
+- Status: pending review
+
+Catatan review:
+- Doc internal `QUERY_OPTIMIZATION.md` sudah deskripsikan composite index `workflow_runs_tenant_status_finished_duration_idx` — tapi migration aktualnya belum ada di tree. Risikonya kelihatan "dijanjikan tapi tidak diimplementasi" kalau reviewer cek migration directory.
+- README publik belum punya tiga section penting yang diminta rubric: query optimization (dengan plan/EXPLAIN), AI failure analysis (response shape + guardrails), dan production infra summary. Trade-offs section juga masih versi singkat awal — tidak menjelaskan keputusan engineering yang lebih nuanced (position metadata, trigger replace, single-worker dev caveat).
+- Trade-offs lama masih bahasa Indonesia campuran, sementara sisa README sudah English. Konsistensi tone perlu diluruskan.
+
+Tindak lanjut:
+- Tambah migration `2026_05_24_120000_add_duration_covering_index_to_workflow_runs_table.php`. Expand-only — index lama tetap supaya tidak break query path lain.
+- README dapat tiga section baru: Query optimization (SQL aktual, nama index, expected Postgres plan, referensi test), AI failure analysis (response shape, sanitization, RBAC, mock-first), Production infrastructure highlights (Dockerfile, probe split, migrations sebagai Helm hook, worker drain, CronJob scheduler).
+- Trade-offs di-rewrite jadi lebih konkret: alasan engineering per keputusan, tambah position-metadata in JSON, trigger replace strategy, single-worker dev caveat.
+- Future improvements diselaraskan dengan tree state sekarang (yang sudah selesai dihapus, yang belum tetap).
+
+Putusan: OK merge.
+
+## PR #19 — feat(workflow): polish authoring runtime — script JS, LOG step, queue, playground CRUD
+
+- Branch: `feature/final-polish`
+- Status: pending review
+
+Catatan review:
+- Trigger workflow saat ini sinkron — controller memanggil executor langsung, jadi step HTTP yang loop balik ke `/api/playground/*` di server yang sama bisa deadlock di PHP built-in server (semua worker terpakai). 5 dari 11 demo workflow yang pakai playground sempat gagal trigger karena pattern ini.
+- ScriptStepHandler masih punya operation enum (`set_output`, `transform`, `fail_demo`, dst). Untuk submission yang menonjolkan workflow authoring, ini terasa terlalu kaku — n8n/Zapier-lite biasanya kasih JS sandbox.
+- Belum ada step type khusus untuk observability di tengah workflow. Demo run yang ingin "log this then continue" terpaksa pakai SCRIPT atau HTTP echo, jadi log line bercampur dengan execution payload.
+- Inspector Input tab masih manual JSON. Reviewer yang authoring step tengah tidak bisa lihat output upstream tanpa run penuh dulu — siklus iterasi konfigurasi terlalu panjang.
+- Beberapa playground endpoint hanya read; belum ada bukti CRUD lengkap untuk demo workflow yang ingin show "POST → GET → PUT → DELETE".
+
+Tindak lanjut:
+- Engine: dispatch setiap WorkflowRun lewat queued `ExecuteWorkflowRun` job. Trigger HTTP endpoint sekarang return PENDING run dalam ms, executor pindah ke queue worker — HTTP step yang loop balik ke dev server tidak deadlock lagi.
+- HTTP step handler dapat scheme allowlist (`http`/`https` only) plus opt-in private/loopback IP filter. Default permissive di dev supaya seeded playground jalan di `127.0.0.1`; production set `HTTP_STEP_ALLOW_PRIVATE_NETWORK=false`.
+- ScriptStepHandler rewrite jadi JavaScript-only: source user dijalankan di sandboxed Node 18 child process. `$doc` shape ala Frappe (input/config/output) plus `fetch`/`URL`/`URLSearchParams`/`console`. `fs`, `child_process`, `vm`, low-level network modules diwipe dari `require.cache` sebelum user code jalan. Wall-clock timeout 8s, script cap 16 KB, env scrubbed.
+- Step type baru `LOG` — tulis structured line ke application log channel. Support placeholder `{{ stepId.path }}` di message dan context. Resolved values jadi step output supaya bisa di-chain ke downstream.
+- Inspector Input tab sekarang execute dependency chain on-demand. Captured upstream output render per node dengan preview pane sendiri. Manual JSON override disembunyikan di balik Edit-manually toggle.
+- Inspector Output tab run current node terhadap captured context, tampilkan status + duration + payload.
+- TestRunOverlay dapat loading state sampai queue worker tulis step rows / log entries.
+- Builder dapat `CodeEditor.vue` (CodeMirror 6 + JavaScript pack + One Dark). SCRIPT step ganti operation-tile UI jadi single editor + cheat-sheet predefined globals.
+- LOG step form: level select, message textarea dengan placeholder hint, optional context key/value rows.
+- Trigger node render sebagai flowchart terminator pill (visually distinct dari process boxes), tone/icon per type untuk LOG nodes.
+- Playground sekarang punya CRUD lengkap: `GET /items`, `POST /items`, `GET /items/{id}`, `PUT/PATCH /items/{id}`, `DELETE /items/{id}`, plus `GET /inventory`. Test coverage di `tests/Feature/Playground/PlaygroundCrudTest.php`.
+- Seeder demo dirombak: 11 workflow yang exercise queue path, JS sandbox, LOG step, condition branching, retry/backoff, timeout, dan playground CRUD. Satu workflow tetap disengaja FAIL untuk drive AI failure-analysis demo.
+
+Verifikasi setelah fix:
+- 120 tests pass (353 assertions)
+- pint pass (145 files)
+- typecheck pass
+- build pass
+- `migrate:fresh --seed --force` clean — 15 migrations + demo dataset
+
+Putusan: OK merge.

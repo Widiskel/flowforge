@@ -29,7 +29,7 @@ export type ApiItem<T> = {
 
 export type WorkflowStepDefinition = {
     id: string
-    type: 'HTTP' | 'DELAY' | 'CONDITION' | 'SCRIPT' | string
+    type: 'HTTP' | 'DELAY' | 'CONDITION' | 'SCRIPT' | 'LOG' | string
     name: string
     dependsOn?: string[]
     timeoutMs?: number

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import Icon from '@/components/ui/Icon.vue'
 
-export type StepType = 'HTTP' | 'SCRIPT' | 'DELAY' | 'CONDITION'
+export type StepType = 'HTTP' | 'SCRIPT' | 'DELAY' | 'CONDITION' | 'LOG'
 
 interface PaletteEntry {
     type: StepType
@@ -16,6 +16,7 @@ const entries: PaletteEntry[] = [
     { type: 'SCRIPT', label: 'Server Script', description: 'Run an allowlisted server-side operation.', icon: 'code' },
     { type: 'DELAY', label: 'Delay', description: 'Wait for a bounded duration before continuing.', icon: 'hourglass_top' },
     { type: 'CONDITION', label: 'Condition', description: 'Branch downstream steps based on an expression.', icon: 'fork_right' },
+    { type: 'LOG', label: 'Log', description: 'Write a structured line into the application log channel.', icon: 'description' },
 ]
 
 const search = ref('')
