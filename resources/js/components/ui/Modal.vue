@@ -56,7 +56,7 @@ onBeforeUnmount(() => {
 <template>
     <Teleport to="body">
         <Transition name="modal">
-            <div v-if="open" class="fixed inset-0 z-[120] flex items-center justify-center p-md md:p-xl" role="dialog" aria-modal="true">
+            <div v-if="open" class="fixed inset-0 z-[200] flex items-center justify-center p-md md:p-xl" role="dialog" aria-modal="true">
                 <div
                     class="absolute inset-0 bg-background/80 backdrop-blur-sm"
                     @click="handleBackdrop"

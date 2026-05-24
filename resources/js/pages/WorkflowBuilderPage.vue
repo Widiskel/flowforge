@@ -993,15 +993,20 @@ onBeforeUnmount(stopTestRunPolling)
             :open="discardDialogOpen"
             title="Discard unsaved changes?"
             subtitle="The workflow definition has unsaved edits. Closing now will lose them."
-            width="md"
+            width="lg"
             @close="discardDialogOpen = false"
         >
-            <p class="text-body-sm text-on-surface-variant px-lg py-md m-0">
-                Save first if you want to keep the trigger, steps, and layout you've changed.
-            </p>
+            <div class="px-lg py-md flex flex-col gap-sm">
+                <p class="text-body-md text-on-surface m-0">
+                    Save first if you want to keep the trigger, steps, and layout you've changed.
+                </p>
+                <p class="text-body-sm text-on-surface-variant m-0">
+                    Discarding takes you back to the workflow list. The persisted version on the server is untouched.
+                </p>
+            </div>
             <template #footer>
                 <Button variant="ghost" @click="discardDialogOpen = false">Keep editing</Button>
-                <Button variant="secondary" leading-icon="delete_sweep" @click="confirmDiscard">Discard changes</Button>
+                <Button variant="danger" leading-icon="delete_sweep" @click="confirmDiscard">Discard changes</Button>
             </template>
         </Modal>
     </div>
