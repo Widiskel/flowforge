@@ -317,6 +317,52 @@ Verifikasi setelah fix:
 
 Putusan: OK merge.
 
+## PR #17 — feat(builder): runtime polish, trigger UX, and bonus surfaces
+
+- Branch: `feature/workflow-builder-runtime-polish`
+- PR: https://github.com/Widiskel/flowforge/pull/17
+- Status: pending review
+
+Catatan review:
+- Workflow builder masih kelihatan mentah untuk reviewer: trigger node belum punya entry-point eksplisit, posisi node tidak persisten, dirty state tidak dilacak, dan TestRunOverlay masih mode placeholder. Sebagai authoring surface, pengalaman editor-nya masih kurang.
+- Step inspector cuma punya satu panel parameters. Padahal user perlu lihat input/output dan tweak settings tanpa harus pindah halaman. Untuk demo/test cycle juga butuh single-step sandbox tanpa full run.
+- Demo seeder sebelumnya cuma 1 workflow Incident Notifier, tidak cukup buat reviewer melihat variasi step type, retry, condition branching, atau realistic failure scenario.
+- Routes API ada 1 entry tapi rate limiter `api` dipasang di middleware group level — endpoint sensitif (login/refresh/webhook/ai-analyze/metrics/sse) harus punya limiter sendiri yang lebih ketat.
+- Belum ada endpoint untuk panggil HTTP/script handlers tanpa create full workflow run. Reviewer kalau mau test step config harus simpan workflow dulu, trigger run, lalu lihat hasilnya. Iterasi config lambat.
+- Tidak ada surface bonus yang menunjukkan production-thinking di luar REST CRUD. Trade-off doc menyebut GraphQL dan playground sebagai future work tapi belum ada artefak nyatanya.
+
+Tindak lanjut:
+- Workflow builder runtime polish:
+  - Trigger node entry-point dengan ID konstan `TRIGGER_NODE_ID`, dependencies step pertama otomatis link ke trigger node
+  - TriggerSelector modal untuk pilih trigger type (manual/scheduled/webhook)
+  - TriggerInspector untuk konfigurasi cron expression atau copy webhook URL+secret
+  - Posisi node persisten via `ui.nodes[].position` di workflow definition
+  - Dirty state tracking + discard confirmation dialog
+  - TestRunOverlay live: terhubung ke real SSE stream, tampilkan step status, logs, dan run detail
+- Step inspector rewrite: tabs Parameters / Input / Output / Settings, simulate-step API untuk dry-run handler tanpa persist run, suggestInput dari upstream step output, notes + display-in-flow toggle
+- Trigger management endpoint: tambah `DELETE /api/workflows/{workflow}/triggers/{trigger}` supaya frontend bisa hapus trigger tanpa hit DB langsung
+- Demo seeder rewrite: 10 curated workflows menggunakan playground endpoints (echo/status/maybe-fail/delay/notify/calc/decisions/mock-crud/inventory) — reviewer bisa trigger berbagai skenario realistis tanpa external dependency
+- Rate limiter discipline: `RateLimiter::for('playground', ...)` ditambah, route per-endpoint pakai `withoutMiddleware('throttle:api')->middleware('throttle:<name>')` supaya health/metrics, ai-analyze, sse, login, refresh, webhook punya budget masing-masing yang sesuai use case
+- Bonus production surfaces (clearly labeled future-work, mock-mode-default):
+  - `POST /api/workflows/simulate-step` — single-step sandbox via handler stack, no DB writes
+  - `POST /api/graphql` — read-only GraphQL surface (Workflow + WorkflowRun + StepRun) via webonyx/graphql-php, tenant-scoped, query size limit 16KB
+  - `/api/playground/*` — 10 demo endpoints (echo, status, maybe-fail, delay, users, notify, calc, decisions, mock-crud, inventory) untuk seeded workflows
+- DataTable enhancement: sortable header, pagination, page size selector, range indicator — supaya runs/workflows list bisa dipakai di volume realistis
+- Step form polish: HttpStepForm/DelayStepForm/ScriptStepForm schema refresh, _shared.ts helper untuk reuse field rendering
+- Auth page fix: Tailwind v4 `--spacing-md: 16px` token shadow `max-w-md` utility (resolve ke 16px instead of 28rem). Fix via explicit `.max-w-md { max-width: 28rem }` di app.css + inline style di LoginPage GlassPanel
+- Condition step handler behaviour update: support nested boolean expression evaluation
+- HTTP step handler behaviour update: timeout default + connection error catch lebih bersih
+
+Verifikasi setelah fix:
+- 82 tests pass (246 assertions, 1.48s)
+- typecheck pass (vue-tsc --noEmit)
+- build pass (621ms, 20 assets)
+- pint pass (133 files)
+- composer validate strict pass
+- 42 routes registered, semua P0/P1 endpoints aktif
+
+Putusan: OK merge.
+
 ## PR #16 — feat(frontend): stitch redesign and FE/BE integration pass
 
 - Branch: `feature/frontend-stitch-redesign`

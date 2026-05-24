@@ -22,13 +22,13 @@ const workflowList = ref<Workflow[]>([])
 const wizardOpen = ref(false)
 
 const columns = [
-    { key: 'name', label: 'Name' },
-    { key: 'status', label: 'Status' },
-    { key: 'version', label: 'Version', align: 'left' as const },
-    { key: 'steps', label: 'Steps', align: 'right' as const },
-    { key: 'updated', label: 'Updated' },
-    { key: 'description', label: 'Description' },
-    { key: 'actions', label: 'Actions', align: 'right' as const, width: '180px' },
+    { key: 'name', label: 'Name', minWidth: 280, sortAccessor: (row: Workflow) => row.name.toLowerCase() },
+    { key: 'status', label: 'Status', minWidth: 140, sortAccessor: (row: Workflow) => row.status },
+    { key: 'version', label: 'Version', minWidth: 110, align: 'left' as const, sortAccessor: (row: Workflow) => row.currentVersion?.versionNumber ?? 0 },
+    { key: 'steps', label: 'Steps', minWidth: 110, align: 'right' as const, sortAccessor: (row: Workflow) => row.currentVersion?.definition.steps.length ?? 0 },
+    { key: 'updated', label: 'Updated', minWidth: 200, sortAccessor: (row: Workflow) => row.updatedAt ?? row.createdAt ?? '' },
+    { key: 'description', label: 'Description', minWidth: 320, sortable: false },
+    { key: 'actions', label: 'Actions', align: 'right' as const, minWidth: 200, sortable: false },
 ]
 
 const filteredWorkflows = computed(() =>
@@ -120,21 +120,21 @@ onMounted(loadWorkflows)
         <Alert v-if="error" tone="error" class="mb-md">{{ error }}</Alert>
 
         <GlassPanel radius="xl" clamp>
-            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-sm md:gap-md p-sm md:p-md border-b border-outline-variant/30 bg-surface-container-high/40">
-                <div class="relative flex-1 max-w-lg">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-md p-md border-b border-outline-variant/30 bg-surface-container-high/40">
+                <div class="relative flex-1 min-w-[260px]">
                     <Icon
                         name="search"
                         :size="18"
-                        class="absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none"
+                        class="absolute left-md top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none"
                     />
                     <input
                         v-model="search"
                         type="search"
-                        placeholder="Search by name, ID, or description…"
-                        class="input-dark w-full rounded-DEFAULT pl-9 pr-md py-sm text-body-md"
+                        placeholder="Search workflows by name, ID, or description…"
+                        class="input-dark w-full rounded-DEFAULT pl-12 pr-md h-11 text-body-md"
                     >
                 </div>
-                <div class="flex items-center gap-sm">
+                <div class="flex items-center gap-sm shrink-0">
                     <div class="relative">
                         <Icon
                             name="filter_list"
@@ -143,7 +143,7 @@ onMounted(loadWorkflows)
                         />
                         <select
                             v-model="statusFilter"
-                            class="input-dark rounded-DEFAULT pl-8 pr-md py-sm text-body-md min-w-[160px] appearance-none"
+                            class="input-dark rounded-DEFAULT pl-8 pr-8 h-11 text-body-md min-w-[180px] appearance-none"
                         >
                             <option value="all">All status</option>
                             <option value="draft">Draft</option>
@@ -167,6 +167,9 @@ onMounted(loadWorkflows)
                 empty-icon="account_tree"
                 empty-title="No workflows match"
                 :empty-description="search ? 'Adjust your filters or clear the search.' : 'Click New Workflow to create your first DAG.'"
+                :page-size="10"
+                default-sort-key="updated"
+                default-sort-dir="desc"
             >
                 <template #cell-name="{ item }">
                     <div class="flex flex-col gap-0.5">
@@ -223,12 +226,6 @@ onMounted(loadWorkflows)
                     </div>
                 </template>
             </DataTable>
-
-            <div class="px-md py-sm border-t border-outline-variant/30 bg-surface-container-low/30">
-                <span class="text-body-sm font-body-sm text-on-surface-variant">
-                    Showing <span class="font-bold text-on-surface">{{ filteredWorkflows.length }}</span> of <span class="font-bold text-on-surface">{{ workflowList.length }}</span> workflows
-                </span>
-            </div>
         </GlassPanel>
 
         <WorkflowMetaWizard

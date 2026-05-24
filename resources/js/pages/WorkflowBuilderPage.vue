@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { MarkerType, VueFlow, type Connection, type Edge, type Node } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -13,8 +13,22 @@ import Alert from '@/components/ui/Alert.vue'
 import Badge from '@/components/ui/Badge.vue'
 import NodePalette, { type StepType } from '@/components/workflow/NodePalette.vue'
 import StepInspector from '@/components/workflow/StepInspector.vue'
-import { createWorkflow, getWorkflow, updateWorkflow, triggerWorkflow } from '@/services/api/client'
-import type { Workflow, WorkflowDefinition, WorkflowStepDefinition } from '@/types/api'
+import TriggerSelector from '@/components/workflow/TriggerSelector.vue'
+import TriggerInspector, { type TriggerDraft } from '@/components/workflow/TriggerInspector.vue'
+import TestRunOverlay from '@/components/TestRunOverlay.vue'
+import Modal from '@/components/ui/Modal.vue'
+import {
+    createWorkflow,
+    createWorkflowTrigger,
+    deleteWorkflowTrigger,
+    getWorkflow,
+    listWorkflowTriggers,
+    runLogs,
+    triggerWorkflow,
+    updateWorkflow,
+    workflowRun as fetchWorkflowRun,
+} from '@/services/api/client'
+import type { Workflow, WorkflowDefinition, WorkflowRun, WorkflowStepDefinition, WorkflowTrigger, WorkflowTriggerType } from '@/types/api'
 
 interface BuilderStep {
     id: string
@@ -29,6 +43,14 @@ interface BuilderStep {
         initialDelayMs?: number
         maxDelayMs?: number
     }
+    notes?: string
+    displayNoteInFlow?: boolean
+    /**
+     * Persisted canvas position. Set when the step is added or dragged so the
+     * preview computed property is no longer responsible for layout —
+     * positions are stable across re-renders, save, reload.
+     */
+    position?: { x: number; y: number }
 }
 
 const route = useRoute()
@@ -44,10 +66,28 @@ const initialStatus = ref<'draft' | 'active' | 'archived'>('draft')
 const saving = ref(false)
 const testRunning = ref(false)
 const testRunError = ref<string | null>(null)
+const testRunModal = ref<WorkflowRun | null>(null)
+const testRunPollHandle = ref<number | null>(null)
+const discardDialogOpen = ref(false)
+const isDirty = ref(false)
 const loadingWorkflow = ref(false)
 const saveError = ref<string | null>(null)
 const editingWorkflow = ref<Workflow | null>(null)
 const paletteOpen = ref(true)
+
+// Trigger state — n8n-style: every workflow needs an entry trigger node.
+const TRIGGER_NODE_ID = '__trigger__'
+const triggerDraft = ref<TriggerDraft | null>(null)
+const triggerPosition = ref<{ x: number; y: number }>({ x: 80, y: 80 })
+const persistedTrigger = ref<WorkflowTrigger | null>(null)
+const triggerInspectorOpen = ref(false)
+const triggerSelectorOpen = ref(false)
+
+const webhookUrl = computed(() => {
+    const id = editingWorkflow.value?.id
+    if (!id) return ''
+    return `${window.location.origin}/api/webhooks/${id}`
+})
 
 const mode = computed<'create' | 'edit' | 'view'>(() => {
     if (route.query.mode === 'view') return 'view'
@@ -57,13 +97,19 @@ const mode = computed<'create' | 'edit' | 'view'>(() => {
 const isReadOnly = computed(() => mode.value === 'view')
 
 const selectedStep = computed(() => steps.value.find((s) => s.id === selectedStepId.value) ?? null)
-const inspectorOpen = computed(() => selectedStep.value !== null && !isReadOnly.value)
+const inspectorOpen = computed(() => selectedStep.value !== null && !isReadOnly.value && selectedStepId.value !== TRIGGER_NODE_ID)
 const availableDeps = computed(() => {
     if (!selectedStep.value) return []
     return steps.value.filter((s) => s.id !== selectedStep.value!.id)
 })
 
-const previewNodes = computed<Node[]>(() => {
+/**
+ * Compute a stable layout position for a step. We only fall back to the
+ * depth/row formula when a step has no persisted `position`, so once the user
+ * (or `addStep`) writes a position the canvas no longer reshuffles when other
+ * nodes are added/removed.
+ */
+function computeFallbackPosition(targetId: string): { x: number; y: number } {
     const depthCache = new Map<string, number>()
     function depth(id: string): number {
         if (depthCache.has(id)) return depthCache.get(id)!
@@ -75,16 +121,30 @@ const previewNodes = computed<Node[]>(() => {
         depthCache.set(id, value)
         return value
     }
+    // Group siblings by column so a fallback layout looks reasonable for
+    // freshly seeded workflows that don't have positions yet.
     const rowsByCol = new Map<number, number>()
-    return steps.value.map((step) => {
-        const col = depth(step.id)
+    let result = { x: 360, y: 80 }
+    for (const step of steps.value) {
+        const col = depth(step.id) + 1
         const row = rowsByCol.get(col) ?? 0
         rowsByCol.set(col, row + 1)
+        if (step.id === targetId) {
+            result = { x: col * 280 + 80, y: row * 150 + 80 }
+        }
+    }
+    return result
+}
+
+const previewNodes = computed<Node[]>(() => {
+    const stepNodes: Node[] = steps.value.map((step) => {
+        const position = step.position ?? computeFallbackPosition(step.id)
         return {
             id: step.id,
             type: 'default',
-            position: { x: col * 280 + 80, y: row * 150 + 80 },
+            position,
             data: {
+                kind: 'step',
                 label: step.name,
                 stepId: step.id,
                 stepType: step.type,
@@ -93,10 +153,24 @@ const previewNodes = computed<Node[]>(() => {
             class: ['flow-node-host', selectedStepId.value === step.id ? 'is-selected' : ''].join(' '),
         }
     })
+    if (triggerDraft.value) {
+        stepNodes.unshift({
+            id: TRIGGER_NODE_ID,
+            type: 'default',
+            position: { ...triggerPosition.value },
+            data: {
+                kind: 'trigger',
+                triggerType: triggerDraft.value.type,
+                enabled: triggerDraft.value.enabled,
+            },
+            class: ['flow-node-host', selectedStepId.value === TRIGGER_NODE_ID ? 'is-selected' : ''].join(' '),
+        })
+    }
+    return stepNodes
 })
 
-const previewEdges = computed<Edge[]>(() =>
-    steps.value.flatMap((step) =>
+const previewEdges = computed<Edge[]>(() => {
+    const stepEdges: Edge[] = steps.value.flatMap((step) =>
         step.dependsOn.map((dep) => ({
             id: `${dep}->${step.id}`,
             source: dep,
@@ -104,8 +178,24 @@ const previewEdges = computed<Edge[]>(() =>
             markerEnd: MarkerType.ArrowClosed,
             animated: true,
         })),
-    ),
-)
+    )
+
+    // Connect the trigger to root steps (steps with no dependencies).
+    if (triggerDraft.value) {
+        const roots = steps.value.filter((s) => s.dependsOn.length === 0)
+        for (const root of roots) {
+            stepEdges.push({
+                id: `${TRIGGER_NODE_ID}->${root.id}`,
+                source: TRIGGER_NODE_ID,
+                target: root.id,
+                markerEnd: MarkerType.ArrowClosed,
+                animated: true,
+                style: { strokeDasharray: '6 4' },
+            })
+        }
+    }
+    return stepEdges
+})
 
 const modeBadge = computed(() => {
     if (mode.value === 'view') return { label: 'VIEW MODE', tone: 'pending' as const }
@@ -119,6 +209,7 @@ const quickStarts: { type: StepType; label: string; icon: string }[] = [
     { type: 'CONDITION', label: 'Condition', icon: 'fork_right' },
     { type: 'DELAY', label: 'Delay', icon: 'hourglass_top' },
 ]
+void quickStarts // referenced when we re-enable the empty-state quickstart row
 
 function stepIcon(type?: string): string {
     switch (type) {
@@ -131,6 +222,7 @@ function stepIcon(type?: string): string {
 }
 
 function minimapNodeColor(node: Node): string {
+    if (node.id === TRIGGER_NODE_ID) return '#a78bfa'
     const t = (node.data?.stepType ?? '').toUpperCase()
     if (t === 'HTTP') return '#7bd0ff'
     if (t === 'SCRIPT') return '#bcc7de'
@@ -171,17 +263,29 @@ function defaultConfigFor(type: StepType): Record<string, unknown> {
 function addStep(type: StepType) {
     if (isReadOnly.value) return
     const id = nextId(type.toLowerCase())
+    // Place new nodes diagonally below-right of the last node so the layout
+    // grows naturally without re-flowing existing positions.
+    const last = steps.value[steps.value.length - 1]
+    const seed = last?.position
+        ?? (steps.value.length === 0
+            ? { x: triggerPosition.value.x + 320, y: triggerPosition.value.y }
+            : { x: 360, y: 80 })
+    const position = {
+        x: seed.x + (last ? 60 : 0),
+        y: seed.y + (last ? 140 : 0),
+    }
     steps.value.push({
         id,
         name: `${type[0]}${type.slice(1).toLowerCase()} Step`,
         type,
-        dependsOn: steps.value.length > 0 ? [steps.value[steps.value.length - 1].id] : [],
+        dependsOn: last ? [last.id] : [],
         config: defaultConfigFor(type),
         retry: {
             maxAttempts: defaultMaxAttempts.value,
             backoff: 'exponential',
             initialDelayMs: 1000,
         },
+        position,
     })
     // Don't auto-select; inspector should appear only when the user clicks a node.
 }
@@ -213,16 +317,88 @@ function onConnect(connection: Connection) {
     }
 }
 
+/**
+ * Persist the dragged position back into builder state so the layout survives
+ * subsequent re-renders (adding/removing other nodes, save/reload, etc.).
+ */
+function onNodeDragStop({ node }: { node: Node }) {
+    if (isReadOnly.value) return
+    const next = { x: node.position.x, y: node.position.y }
+    if (node.id === TRIGGER_NODE_ID) {
+        triggerPosition.value = next
+        return
+    }
+    const step = steps.value.find((s) => s.id === node.id)
+    if (step) {
+        step.position = next
+    }
+}
+
 function onNodeClick({ node }: { node: Node }) {
+    if (node.id === TRIGGER_NODE_ID) {
+        selectedStepId.value = TRIGGER_NODE_ID
+        triggerInspectorOpen.value = true
+        return
+    }
     selectedStepId.value = node.id
+    triggerInspectorOpen.value = false
 }
 
 function onPaneClick() {
     selectedStepId.value = null
+    triggerInspectorOpen.value = false
+}
+
+function selectTrigger(type: WorkflowTriggerType) {
+    triggerSelectorOpen.value = false
+    triggerDraft.value = {
+        type,
+        cronExpression: type === 'scheduled' ? '0 * * * *' : '',
+        timezone: 'UTC',
+        webhookSecret: '',
+        enabled: true,
+    }
+    selectedStepId.value = TRIGGER_NODE_ID
+    triggerInspectorOpen.value = true
+}
+
+function updateTriggerDraft(draft: TriggerDraft) {
+    triggerDraft.value = draft
+}
+
+function removeTrigger() {
+    triggerDraft.value = null
+    persistedTrigger.value = null
+    triggerInspectorOpen.value = false
+    if (selectedStepId.value === TRIGGER_NODE_ID) selectedStepId.value = null
+}
+
+function changeTriggerType() {
+    triggerInspectorOpen.value = false
+    triggerSelectorOpen.value = true
 }
 
 async function load(): Promise<void> {
     const workflowId = typeof route.query.workflowId === 'string' ? route.query.workflowId : null
+
+    // Reset all builder state so navigating between workflows (or from
+    // edit → create) doesn't leak stale data — steps, triggers, error banners,
+    // selection, all get cleared.
+    steps.value = []
+    selectedStepId.value = null
+    triggerDraft.value = null
+    persistedTrigger.value = null
+    triggerInspectorOpen.value = false
+    triggerSelectorOpen.value = false
+    triggerPosition.value = { x: 80, y: 80 }
+    editingWorkflow.value = null
+    workflowName.value = ''
+    workflowDescription.value = ''
+    globalTimeoutMs.value = 60000
+    defaultMaxAttempts.value = 3
+    initialStatus.value = 'draft'
+    saveError.value = null
+    testRunError.value = null
 
     // Hydrate from wizard query when creating a new workflow.
     if (!workflowId) {
@@ -236,6 +412,8 @@ async function load(): Promise<void> {
         if (Number.isFinite(queryTimeout) && queryTimeout > 0) globalTimeoutMs.value = queryTimeout
         if (Number.isFinite(queryAttempts) && queryAttempts >= 1 && queryAttempts <= 5) defaultMaxAttempts.value = queryAttempts
         if (queryStatus === 'draft' || queryStatus === 'active' || queryStatus === 'archived') initialStatus.value = queryStatus
+        await nextTick()
+        isDirty.value = false
         return
     }
 
@@ -254,11 +432,42 @@ async function load(): Promise<void> {
             config: (s.config ?? {}) as Record<string, unknown>,
             retry: s.retry,
             timeoutMs: s.timeoutMs,
+            position: s.position ? { x: s.position.x, y: s.position.y } : undefined,
         }))
+
+        const savedTrigger = workflow.currentVersion?.definition.ui?.triggerPosition
+        if (savedTrigger && Number.isFinite(savedTrigger.x) && Number.isFinite(savedTrigger.y)) {
+            triggerPosition.value = { x: savedTrigger.x, y: savedTrigger.y }
+        }
+
+        // Load existing triggers; show the first one (n8n-style: one trigger per workflow).
+        // Surface failures instead of swallowing — silent failure here is what
+        // made trigger nodes vanish on edit before.
+        try {
+            const triggers = await listWorkflowTriggers(workflow.id)
+            if (triggers.length > 0) {
+                const t = triggers[0]
+                persistedTrigger.value = t
+                triggerDraft.value = {
+                    type: t.type,
+                    cronExpression: t.cronExpression ?? '',
+                    timezone: t.timezone ?? 'UTC',
+                    webhookSecret: '', // server-side stored, masked on read
+                    enabled: t.enabled,
+                }
+            }
+        } catch (err) {
+            saveError.value = `Could not load triggers: ${err instanceof Error ? err.message : 'unknown error'}`
+        }
     } catch (err) {
         saveError.value = err instanceof Error ? err.message : 'Failed to load workflow.'
     } finally {
         loadingWorkflow.value = false
+        // After hydrate completes, the deep watcher fires once because refs
+        // were re-assigned. Wait for that flush, then reset dirty so we don't
+        // immediately treat a freshly loaded workflow as having unsaved edits.
+        await nextTick()
+        isDirty.value = false
     }
 }
 
@@ -273,11 +482,25 @@ async function save() {
         saveError.value = 'Add at least one step before saving.'
         return
     }
+    if (!triggerDraft.value) {
+        saveError.value = 'Pick a trigger before saving — every workflow needs an entry-point.'
+        triggerSelectorOpen.value = true
+        return
+    }
+    if (triggerDraft.value.type === 'scheduled' && !triggerDraft.value.cronExpression.trim()) {
+        saveError.value = 'Scheduled trigger requires a cron expression.'
+        return
+    }
+    if (triggerDraft.value.type === 'webhook' && !triggerDraft.value.webhookSecret.trim() && !persistedTrigger.value) {
+        saveError.value = 'Webhook trigger requires a secret. Click Generate in the trigger inspector.'
+        return
+    }
     saving.value = true
     try {
         const definition = buildDefinition()
+        let saved: Workflow
         if (mode.value === 'edit' && editingWorkflow.value) {
-            await updateWorkflow(editingWorkflow.value.id, {
+            saved = await updateWorkflow(editingWorkflow.value.id, {
                 name: workflowName.value,
                 description: workflowDescription.value || null,
                 status: editingWorkflow.value.status,
@@ -285,7 +508,7 @@ async function save() {
                 definition,
             })
         } else {
-            await createWorkflow({
+            saved = await createWorkflow({
                 name: workflowName.value,
                 description: workflowDescription.value || null,
                 status: initialStatus.value,
@@ -293,6 +516,14 @@ async function save() {
                 definition,
             })
         }
+        editingWorkflow.value = saved
+
+        // Reconcile trigger: if no persisted row yet, create one. If type changed, replace it.
+        await syncTrigger(saved.id)
+
+        // Mark clean before navigating so the route guard / future work won't
+        // re-prompt with "discard unsaved changes".
+        isDirty.value = false
         await router.push({ name: 'workflows.list' })
     } catch (err) {
         saveError.value = err instanceof Error ? err.message : 'Failed to save workflow.'
@@ -301,14 +532,59 @@ async function save() {
     }
 }
 
+async function syncTrigger(workflowId: string): Promise<void> {
+    if (!triggerDraft.value) return
+    const draft = triggerDraft.value
+
+    // If we have a persisted trigger of the same type and the user did not rotate the secret,
+    // we leave it alone. Otherwise we drop and recreate.
+    const sameType = persistedTrigger.value?.type === draft.type
+    const secretRotated = draft.type === 'webhook' && draft.webhookSecret.trim() !== ''
+    const cronChanged = draft.type === 'scheduled'
+        && persistedTrigger.value?.cronExpression !== draft.cronExpression
+    const enabledChanged = persistedTrigger.value?.enabled !== draft.enabled
+
+    if (sameType && !secretRotated && !cronChanged && !enabledChanged) {
+        return
+    }
+
+    if (persistedTrigger.value) {
+        try {
+            await deleteWorkflowTrigger(workflowId, persistedTrigger.value.id)
+        } catch {
+            // best-effort
+        }
+    }
+
+    const created = await createWorkflowTrigger(workflowId, {
+        type: draft.type,
+        cron_expression: draft.type === 'scheduled' ? draft.cronExpression : null,
+        timezone: draft.timezone,
+        webhook_secret: draft.type === 'webhook' ? (draft.webhookSecret || undefined) : null,
+        enabled: draft.enabled,
+    })
+    persistedTrigger.value = created
+}
+
 function discard() {
-    if (steps.value.length === 0 && !workflowName.value) {
+    // No edits to lose — leave silently. Otherwise prompt with a Modal so the
+    // confirmation matches the rest of the design system instead of relying on
+    // the browser's native confirm() dialog.
+    if (!isDirty.value && steps.value.length === 0 && !workflowName.value) {
         router.push({ name: 'workflows.list' })
         return
     }
-    if (confirm('Discard unsaved changes?')) {
+    if (!isDirty.value) {
         router.push({ name: 'workflows.list' })
+        return
     }
+    discardDialogOpen.value = true
+}
+
+function confirmDiscard() {
+    discardDialogOpen.value = false
+    isDirty.value = false
+    router.push({ name: 'workflows.list' })
 }
 
 function buildDefinition(): WorkflowDefinition {
@@ -324,7 +600,11 @@ function buildDefinition(): WorkflowDefinition {
             config: s.config,
             retry: s.retry,
             timeoutMs: s.timeoutMs,
+            position: s.position,
         })),
+        ui: {
+            triggerPosition: { x: triggerPosition.value.x, y: triggerPosition.value.y },
+        },
     }
 }
 
@@ -339,11 +619,17 @@ async function testRun() {
         testRunError.value = 'Add at least one step before running.'
         return
     }
+    if (!triggerDraft.value) {
+        testRunError.value = 'Pick a trigger before running — every workflow needs an entry-point.'
+        triggerSelectorOpen.value = true
+        return
+    }
     testRunning.value = true
     try {
         const definition = buildDefinition()
         let workflowId = editingWorkflow.value?.id ?? null
 
+        // Save (or create) so the run executes against the latest definition.
         if (workflowId) {
             const updated = await updateWorkflow(workflowId, {
                 name: workflowName.value,
@@ -364,10 +650,20 @@ async function testRun() {
             })
             editingWorkflow.value = created
             workflowId = created.id
+            // After saving the new workflow, sync the trigger and switch the URL
+            // so subsequent saves go through the update path. Without this the
+            // builder is stuck in 'create' mode and a second save would create
+            // a duplicate workflow.
+            await syncTrigger(workflowId)
+            await router.replace({ name: 'workflows.builder', query: { workflowId } })
         }
 
         const run = await triggerWorkflow(workflowId)
-        await router.push({ name: 'runs', query: { runId: run.id } })
+        // The persisted snapshot is the new clean baseline.
+        isDirty.value = false
+        // Open the inline result modal — never redirect away from the builder.
+        testRunModal.value = run
+        startTestRunPolling(run.id)
     } catch (err) {
         testRunError.value = err instanceof Error ? err.message : 'Test run failed.'
     } finally {
@@ -375,11 +671,76 @@ async function testRun() {
     }
 }
 
+/**
+ * Poll the run + its logs until it reaches a terminal status. We use polling
+ * (not SSE) here because the builder modal is short-lived and the executor is
+ * synchronous — most test runs finish before the first tick.
+ */
+function startTestRunPolling(runId: string) {
+    stopTestRunPolling()
+    const tick = async () => {
+        if (!testRunModal.value || testRunModal.value.id !== runId) return
+        try {
+            const [run, logs] = await Promise.all([
+                fetchWorkflowRun(runId),
+                runLogs(runId),
+            ])
+            const terminal = ['SUCCESS', 'FAILED', 'TIMEOUT', 'CANCELLED', 'SKIPPED'].includes(run.status)
+            testRunModal.value = { ...run, logs: logs.data }
+            if (!terminal) {
+                testRunPollHandle.value = window.setTimeout(tick, 1000)
+            } else {
+                testRunPollHandle.value = null
+            }
+        } catch {
+            // Single failure isn't fatal; retry once. Stop after that.
+            testRunPollHandle.value = window.setTimeout(tick, 2000)
+        }
+    }
+    testRunPollHandle.value = window.setTimeout(tick, 200)
+}
+
+function stopTestRunPolling() {
+    if (testRunPollHandle.value !== null) {
+        clearTimeout(testRunPollHandle.value)
+        testRunPollHandle.value = null
+    }
+}
+
+function closeTestRunModal() {
+    stopTestRunPolling()
+    testRunModal.value = null
+}
+
 watch(() => route.query, () => {
     load()
 })
 
+// Mark builder as dirty whenever any user-editable state changes. This drives
+// the Cancel discard prompt — we only nag the user if there's something to
+// lose. The watcher is deep so node renames, dependency edits, config tweaks,
+// drag positions, and trigger draft changes all flip the flag.
+watch(
+    () => [
+        steps.value,
+        triggerDraft.value,
+        triggerPosition.value,
+        workflowName.value,
+        workflowDescription.value,
+        globalTimeoutMs.value,
+        defaultMaxAttempts.value,
+        initialStatus.value,
+    ],
+    () => {
+        isDirty.value = true
+    },
+    { deep: true },
+)
+
 onMounted(load)
+
+// Cleanup polling timers if the component unmounts mid-run.
+onBeforeUnmount(stopTestRunPolling)
 </script>
 
 <template>
@@ -421,7 +782,7 @@ onMounted(load)
                     :disabled="saving || testRunning"
                     glow
                     @click="save"
-                >{{ saving ? 'Saving…' : mode === 'edit' ? 'Update' : 'Save' }}</Button>
+                >{{ saving ? 'Saving…' : 'Save' }}</Button>
             </div>
         </header>
 
@@ -439,11 +800,29 @@ onMounted(load)
                 :nodes-connectable="!isReadOnly"
                 :elements-selectable="!isReadOnly"
                 @node-click="onNodeClick"
+                @node-drag-stop="onNodeDragStop"
                 @pane-click="onPaneClick"
                 @connect="onConnect"
             >
                 <template #node-default="{ data, selected }">
                     <div
+                        v-if="data.kind === 'trigger'"
+                        class="flow-node-terminator"
+                        :class="[selected ? 'is-selected' : '', !data.enabled ? 'is-disabled' : '']"
+                    >
+                        <span class="flow-node-terminator__icon material-symbols-outlined">
+                            {{ data.triggerType === 'manual' ? 'play_circle' : data.triggerType === 'scheduled' ? 'schedule' : 'webhook' }}
+                        </span>
+                        <span class="flow-node-terminator__copy">
+                            <span class="flow-node-terminator__eyebrow">START</span>
+                            <span class="flow-node-terminator__title">
+                                {{ data.triggerType === 'manual' ? 'Manual trigger' : data.triggerType === 'scheduled' ? 'Scheduled trigger' : 'Webhook trigger' }}
+                            </span>
+                        </span>
+                        <span class="flow-node-terminator__pip" :class="data.enabled ? 'is-on' : 'is-off'" :title="data.enabled ? 'enabled' : 'disabled'"></span>
+                    </div>
+                    <div
+                        v-else
                         class="flow-node"
                         :class="[
                             `tone-${(data.stepType || 'http').toLowerCase()}`,
@@ -489,31 +868,27 @@ onMounted(load)
                 </div>
             </div>
 
-            <!-- Empty hint card sits over canvas without blocking interaction. -->
+            <!-- Empty state: only shown when there's no trigger yet. After the
+                 trigger is picked, the canvas already has a visible node + the
+                 palette on the left becomes the action target — no need for an
+                 empty CTA card. -->
             <div
-                v-else-if="steps.length === 0"
+                v-else-if="!triggerDraft"
                 class="builder-overlay builder-overlay--hint"
             >
                 <div class="builder-empty">
                     <div class="builder-empty__halo">
-                        <Icon name="auto_awesome_motion" :size="28" />
+                        <Icon name="bolt" :size="28" />
                     </div>
-                    <h3 class="builder-empty__title">Start building your workflow</h3>
+                    <h3 class="builder-empty__title">Pick a trigger to get started</h3>
                     <p class="builder-empty__copy">
-                        Pick a step type from the palette on the left. Each new step links to the previous one automatically.
+                        Every FlowForge workflow needs an entry-point. Choose a trigger type — you can add steps after.
                     </p>
-                    <div class="builder-empty__chips">
-                        <button
-                            v-for="quick in quickStarts"
-                            :key="quick.type"
-                            type="button"
-                            class="builder-empty__chip"
-                            @click="addStep(quick.type)"
-                        >
-                            <Icon :name="quick.icon" :size="16" />
-                            <span>{{ quick.label }}</span>
-                        </button>
-                    </div>
+                    <Button
+                        leading-icon="add"
+                        glow
+                        @click="triggerSelectorOpen = true"
+                    >Choose trigger</Button>
                 </div>
             </div>
 
@@ -552,7 +927,60 @@ onMounted(load)
                     />
                 </div>
             </Transition>
+
+            <Transition name="slide-right">
+                <div
+                    v-if="triggerInspectorOpen && triggerDraft && !isReadOnly"
+                    class="builder-inspector-rail"
+                >
+                    <TriggerInspector
+                        :draft="triggerDraft"
+                        :workflow-id="editingWorkflow?.id ?? null"
+                        :webhook-url="webhookUrl"
+                        :persisted-secret-masked="!!persistedTrigger && persistedTrigger.type === 'webhook' && !triggerDraft.webhookSecret"
+                        @update="updateTriggerDraft"
+                        @remove="removeTrigger"
+                        @change-type="changeTriggerType"
+                    />
+                </div>
+            </Transition>
         </div>
+
+        <TriggerSelector
+            :open="triggerSelectorOpen"
+            :title="triggerDraft ? 'Change trigger type' : undefined"
+            :subtitle="triggerDraft ? 'Switching the trigger replaces the current entry-point.' : undefined"
+            @close="triggerSelectorOpen = false"
+            @select="selectTrigger"
+        />
+
+        <!-- Test run result modal — opens after a successful Test Run, polls the
+             run + logs until terminal status, then stays open so the user can
+             review the path and logs without leaving the builder. -->
+        <TestRunOverlay
+            v-if="testRunModal"
+            :run="testRunModal"
+            :is-open="!!testRunModal"
+            @close="closeTestRunModal"
+        />
+
+        <!-- Discard-unsaved-changes confirmation. Only mounts when triggered so
+             ESC/backdrop don't accidentally interfere with the canvas. -->
+        <Modal
+            :open="discardDialogOpen"
+            title="Discard unsaved changes?"
+            subtitle="The workflow definition has unsaved edits. Closing now will lose them."
+            width="md"
+            @close="discardDialogOpen = false"
+        >
+            <p class="text-body-sm text-on-surface-variant px-lg py-md m-0">
+                Save first if you want to keep the trigger, steps, and layout you've changed.
+            </p>
+            <template #footer>
+                <Button variant="ghost" @click="discardDialogOpen = false">Keep editing</Button>
+                <Button variant="secondary" leading-icon="delete_sweep" @click="confirmDiscard">Discard changes</Button>
+            </template>
+        </Modal>
     </div>
 </template>
 
@@ -1074,6 +1502,101 @@ onMounted(load)
 .flow-node.tone-condition {
     border-left: 3px solid var(--color-running);
 }
+
+/* Trigger node — flowchart "terminator" (stadium / pill).
+ * Visually distinct from the rectangular process steps so the entry point
+ * reads as the start of the flow at a glance. */
+.flow-node-terminator {
+    --terminator-tint: #a78bfa;
+    width: 240px;
+    min-height: 64px;
+    padding: 10px 18px 10px 14px;
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    border-radius: 9999px;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--terminator-tint) 22%, var(--color-surface-container-high)) 0%,
+        var(--color-surface-container-high) 65%
+    );
+    border: 1.5px solid color-mix(in srgb, var(--terminator-tint) 55%, var(--color-outline-variant));
+    color: var(--color-on-surface);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.32),
+        inset 0 0 0 1px color-mix(in srgb, var(--terminator-tint) 18%, transparent);
+    text-align: left;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.flow-node-terminator.is-selected {
+    border-color: color-mix(in srgb, var(--terminator-tint) 90%, transparent);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--terminator-tint) 80%, transparent),
+        0 12px 32px rgba(0, 0, 0, 0.42),
+        0 0 22px color-mix(in srgb, var(--terminator-tint) 35%, transparent);
+}
+
+.flow-node-terminator.is-disabled {
+    opacity: 0.65;
+    border-style: dashed;
+}
+
+.flow-node-terminator__icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--terminator-tint) 24%, transparent);
+    color: var(--terminator-tint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px !important;
+    border: 1px solid color-mix(in srgb, var(--terminator-tint) 50%, transparent);
+}
+
+.flow-node-terminator__copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.flow-node-terminator__eyebrow {
+    font-family: var(--font-code-md);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: var(--terminator-tint);
+    text-transform: uppercase;
+    line-height: 1;
+}
+
+.flow-node-terminator__title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-on-surface);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+.flow-node-terminator__pip {
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    background: var(--color-success);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 25%, transparent);
+}
+
+.flow-node-terminator__pip.is-off {
+    background: var(--color-warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 25%, transparent);
+}
+
+.flow-node__meta.tone-on { color: var(--color-success); }
+.flow-node__meta.tone-off { color: var(--color-warning); }
 .flow-node.tone-condition .flow-node__icon {
     background: color-mix(in srgb, var(--color-running) 14%, transparent);
     color: var(--color-running);

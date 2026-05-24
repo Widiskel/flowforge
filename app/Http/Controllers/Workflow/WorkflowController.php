@@ -23,22 +23,39 @@ class WorkflowController extends Controller
 
         $perPage = (int) $request->integer('per_page', 15);
 
+        $sortAllowlist = ['created_at', 'updated_at', 'name', 'status'];
+        $sortRaw = (string) $request->query('sort', '-updated_at');
+        $sortDir = str_starts_with($sortRaw, '-') ? 'desc' : 'asc';
+        $sortColumn = ltrim($sortRaw, '-');
+
         validator(
-            ['per_page' => $perPage],
-            ['per_page' => ['integer', 'min:1', 'max:100']],
+            ['per_page' => $perPage, 'sort_column' => $sortColumn],
+            [
+                'per_page' => ['integer', 'min:1', 'max:100'],
+                'sort_column' => ['in:'.implode(',', $sortAllowlist)],
+            ],
         )->validate();
 
         $query = Workflow::query()
             ->with('currentVersion')
             ->where('tenant_id', $request->user()->tenant_id)
-            ->latest();
+            ->orderBy($sortColumn, $sortDir);
 
         if ($request->filled('status')) {
-            $query->where('status', $request->string('status')->value());
+            $allowed = ['draft', 'active', 'archived'];
+            $status = (string) $request->string('status');
+            if (! in_array($status, $allowed, true)) {
+                abort(422, 'Unsupported status filter.');
+            }
+            $query->where('status', $status);
         }
 
         if ($request->filled('search')) {
-            $query->where('name', 'like', '%'.$request->string('search')->value().'%');
+            $search = (string) $request->string('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('description', 'like', '%'.$search.'%');
+            });
         }
 
         return WorkflowResource::collection($query->paginate($perPage));

@@ -11,6 +11,9 @@ export interface BuilderStep {
         initialDelayMs?: number
         maxDelayMs?: number
     }
+    notes?: string
+    displayNoteInFlow?: boolean
+    position?: { x: number; y: number }
 }
 
 /** Reactively coerce a config value with a typed getter/setter. */

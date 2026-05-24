@@ -11,7 +11,6 @@ import Tabs from '@/components/ui/Tabs.vue'
 import StatusBadge from '@/components/workflow/StatusBadge.vue'
 import StepTimeline from '@/components/workflow/StepTimeline.vue'
 import LogTerminal from '@/components/workflow/LogTerminal.vue'
-import TestRunOverlay from '@/components/TestRunOverlay.vue'
 import { workflows, allWorkflowRuns, runLogs, analyzeFailure } from '@/services/api/client'
 import type {
     AiFailureAnalysis,
@@ -34,7 +33,6 @@ const logsLoading = ref(false)
 const analysis = ref<AiFailureAnalysis | null>(null)
 const analysisLoading = ref(false)
 const analysisError = ref<string | null>(null)
-const showOverlay = ref(false)
 
 const selectedRun = computed(() => runs.value.find((r) => r.id === selectedRunId.value) ?? null)
 
@@ -132,12 +130,6 @@ onMounted(loadRuns)
             subtitle="Inspect tenant-scoped runs, drill into logs, and request AI failure analysis on failed runs."
         >
             <template #actions>
-                <Button
-                    v-if="selectedRun"
-                    variant="secondary"
-                    leading-icon="bolt"
-                    @click="showOverlay = true"
-                >Run Details</Button>
                 <Button
                     variant="secondary"
                     leading-icon="refresh"
@@ -301,12 +293,5 @@ onMounted(loadRuns)
                 </template>
             </div>
         </div>
-
-        <TestRunOverlay
-            v-if="selectedRun"
-            :run="selectedRun"
-            :is-open="showOverlay"
-            @close="showOverlay = false"
-        />
     </div>
 </template>

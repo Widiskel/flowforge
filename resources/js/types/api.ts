@@ -35,6 +35,15 @@ export type WorkflowStepDefinition = {
     timeoutMs?: number
     config?: Record<string, unknown>
     retry?: { maxAttempts?: number }
+    /**
+     * Optional builder-only metadata. Persisted with the workflow so the canvas
+     * layout users arrange survives a page reload. Ignored by the executor.
+     */
+    position?: { x: number; y: number }
+}
+
+export type WorkflowDefinitionUi = {
+    triggerPosition?: { x: number; y: number }
 }
 
 export type WorkflowDefinition = {
@@ -42,6 +51,11 @@ export type WorkflowDefinition = {
     name: string
     globalTimeoutMs: number
     steps: WorkflowStepDefinition[]
+    /**
+     * Optional UI hints (e.g. trigger node position). Carried through the JSON
+     * definition so the builder can rehydrate exactly what the user saved.
+     */
+    ui?: WorkflowDefinitionUi
 }
 
 export type WorkflowVersion = {
@@ -246,6 +260,35 @@ export type RawExecutionLog = {
     message: string
     context?: Record<string, unknown> | null
     created_at?: string
+}
+
+export type WorkflowTriggerType = 'manual' | 'scheduled' | 'webhook'
+
+export type WorkflowTrigger = {
+    id: string
+    workflowId: string
+    type: WorkflowTriggerType
+    webhookSecret?: string | null
+    cronExpression?: string | null
+    timezone: string
+    enabled: boolean
+    nextRunAt?: string | null
+    lastRunAt?: string | null
+    createdAt?: string | null
+}
+
+export type RawWorkflowTrigger = {
+    id: string
+    workflow_id: string
+    type: WorkflowTriggerType
+    webhook_secret?: string | null
+    cron_expression?: string | null
+    timezone: string
+    enabled: boolean
+    next_run_at?: string | null
+    last_run_at?: string | null
+    created_by?: number | string | null
+    created_at?: string | null
 }
 
 export type AuthTokenPair = {

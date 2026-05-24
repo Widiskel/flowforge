@@ -1,67 +1,82 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import Alert from '@/components/ui/Alert.vue'
 import type { BuilderStep } from './_shared'
 
-type Unit = 'ms' | 's'
+type Unit = 'milliseconds' | 'seconds' | 'minutes'
+
+const UNIT_TO_MS: Record<Unit, number> = {
+    milliseconds: 1,
+    seconds: 1000,
+    minutes: 60_000,
+}
+
+const MAX_MS = 30_000
 
 const props = defineProps<{ step: BuilderStep }>()
 
-const unit = ref<Unit>('s')
-const amount = ref(1)
+const amount = ref<number>(5)
+const unit = ref<Unit>('seconds')
 
 function pull() {
-    const ms = Number(props.step.config.durationMs ?? 1000)
-    if (ms < 1000 || ms % 1000 !== 0) {
-        unit.value = 'ms'
-        amount.value = ms
-    } else {
-        unit.value = 's'
+    const ms = Number(props.step.config.durationMs ?? 5000)
+    if (ms % 60_000 === 0 && ms >= 60_000) {
+        unit.value = 'minutes'
+        amount.value = ms / 60_000
+    } else if (ms % 1000 === 0 && ms >= 1000) {
+        unit.value = 'seconds'
         amount.value = ms / 1000
+    } else {
+        unit.value = 'milliseconds'
+        amount.value = ms
     }
 }
 
 watch(() => props.step.id, pull, { immediate: true })
 
-const displayMs = computed(() => (unit.value === 's' ? amount.value * 1000 : amount.value))
+const computedMs = computed(() => Math.max(0, Math.floor(amount.value * UNIT_TO_MS[unit.value])))
+const cappedMs = computed(() => Math.min(MAX_MS, computedMs.value))
+const exceedsCap = computed(() => computedMs.value > MAX_MS)
 
 watch([amount, unit], () => {
-    let ms = displayMs.value
-    if (!Number.isFinite(ms) || ms <= 0) ms = 1
-    if (ms > 30000) ms = 30000
-    props.step.config.durationMs = ms
+    props.step.config.durationMs = cappedMs.value
 })
 </script>
 
 <template>
     <div class="flex flex-col gap-md">
-        <label class="flex flex-col gap-1">
-            <span class="flex items-center justify-between">
-                <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Duration</span>
-                <span class="text-body-sm text-on-surface-variant">capped at 30 seconds</span>
-            </span>
-            <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-sm">
+        <Alert tone="info" title="Wait After Time Interval" compact>
+            FlowForge waits a fixed amount of time before continuing. Capped at 30 seconds for safety. <span class="text-on-surface-variant">Other resume modes (At Specified Time, Webhook, Form) are not in MVP.</span>
+        </Alert>
+
+        <div class="grid grid-cols-2 gap-sm">
+            <label class="flex flex-col gap-1">
+                <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Wait Amount</span>
                 <input
                     v-model.number="amount"
                     type="number"
-                    :min="unit === 's' ? 1 : 100"
-                    :max="unit === 's' ? 30 : 30000"
-                    :step="unit === 's' ? 1 : 100"
+                    min="0"
+                    step="1"
                     class="input-dark rounded-DEFAULT px-sm py-1.5 text-body-md tabular-nums"
                 >
-                <div class="inline-flex items-center rounded-DEFAULT bg-surface-container-low border border-outline-variant/40 p-0.5 text-label-caps font-label-caps">
-                    <button
-                        type="button"
-                        :class="['px-sm py-1 rounded-[3px] transition-colors', unit === 'ms' ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant']"
-                        @click="unit = 'ms'"
-                    >ms</button>
-                    <button
-                        type="button"
-                        :class="['px-sm py-1 rounded-[3px] transition-colors', unit === 's' ? 'bg-secondary/15 text-secondary' : 'text-on-surface-variant']"
-                        @click="unit = 's'"
-                    >s</button>
-                </div>
-            </div>
-            <p class="text-body-sm text-on-surface-variant m-0">Effective wait: <span class="font-code-md text-on-surface">{{ displayMs }} ms</span></p>
-        </label>
+            </label>
+            <label class="flex flex-col gap-1">
+                <span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Wait Unit</span>
+                <select
+                    v-model="unit"
+                    class="input-dark rounded-DEFAULT px-sm py-1.5 text-body-md"
+                >
+                    <option value="milliseconds">Milliseconds</option>
+                    <option value="seconds">Seconds</option>
+                    <option value="minutes">Minutes</option>
+                </select>
+            </label>
+        </div>
+
+        <Alert v-if="exceedsCap" tone="warning" compact>
+            Requested {{ computedMs }} ms exceeds the 30 s safety cap. The step will run for {{ cappedMs }} ms.
+        </Alert>
+
+        <p class="text-body-sm text-on-surface-variant m-0">Effective wait: <span class="font-code-md text-on-surface">{{ cappedMs }} ms</span></p>
     </div>
 </template>
