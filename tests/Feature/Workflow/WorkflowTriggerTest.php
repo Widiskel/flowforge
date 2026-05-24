@@ -67,7 +67,7 @@ class WorkflowTriggerTest extends TestCase
                         'type' => 'SCRIPT',
                         'name' => 'Init',
                         'dependsOn' => [],
-                        'config' => ['operation' => 'set_output', 'output' => ['ready' => true]],
+                        'config' => ['script' => 'return { ready: true };'],
                         'retry' => ['maxAttempts' => 1],
                     ],
                     [
@@ -75,7 +75,7 @@ class WorkflowTriggerTest extends TestCase
                         'type' => 'SCRIPT',
                         'name' => 'Finish',
                         'dependsOn' => ['init'],
-                        'config' => ['operation' => 'noop'],
+                        'config' => ['script' => 'return null;'],
                         'retry' => ['maxAttempts' => 1],
                     ],
                 ],

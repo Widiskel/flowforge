@@ -47,10 +47,36 @@ class WorkflowRunPersister
                     'max_attempts' => $step['retry']['maxAttempts'] ?? 1,
                     'started_at' => $now,
                     'finished_at' => $now,
-                    'duration_ms' => 0,
+                    'duration_ms' => $stepResult->durationMs ?? 0,
                     'output' => $stepResult->output,
                     'error_message' => $stepResult->error,
                 ]);
+
+                // LOG step: surface the user-authored message as a first-class
+                // execution log entry so it shows up in the live logs panel,
+                // not buried inside the step output blob.
+                if (
+                    ($step['type'] ?? null) === 'LOG'
+                    && $stepResult->status === StepRunStatus::SUCCESS
+                    && is_array($stepResult->output)
+                    && isset($stepResult->output['message'])
+                ) {
+                    $level = is_string($stepResult->output['level'] ?? null)
+                        ? strtolower((string) $stepResult->output['level'])
+                        : 'info';
+
+                    ExecutionLog::query()->create([
+                        'id' => (string) Str::uuid(),
+                        'tenant_id' => $run->tenant_id,
+                        'workflow_run_id' => $run->id,
+                        'workflow_step_run_id' => $stepRun->id,
+                        'level' => in_array($level, ['debug', 'info', 'notice', 'warning', 'error', 'critical'], true) ? $level : 'info',
+                        'event' => 'log.step',
+                        'message' => (string) $stepResult->output['message'],
+                        'context' => is_array($stepResult->output['context'] ?? null) ? $stepResult->output['context'] : null,
+                        'created_at' => $now,
+                    ]);
+                }
 
                 ExecutionLog::query()->create([
                     'id' => (string) Str::uuid(),

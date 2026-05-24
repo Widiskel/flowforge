@@ -257,7 +257,7 @@ export type SimulateStepResponse = {
  * persistence. Powers the Input/Output simulate buttons in the Node Inspector.
  */
 export async function simulateStep(payload: {
-    type: 'HTTP' | 'DELAY' | 'CONDITION' | 'SCRIPT'
+    type: 'HTTP' | 'DELAY' | 'CONDITION' | 'SCRIPT' | 'LOG'
     config: Record<string, unknown>
     input?: Record<string, unknown>
 }): Promise<SimulateStepResponse> {

@@ -1,7 +1,7 @@
 export interface BuilderStep {
     id: string
     name: string
-    type: 'HTTP' | 'SCRIPT' | 'DELAY' | 'CONDITION'
+    type: 'HTTP' | 'SCRIPT' | 'DELAY' | 'CONDITION' | 'LOG'
     dependsOn: string[]
     config: Record<string, unknown>
     timeoutMs?: number

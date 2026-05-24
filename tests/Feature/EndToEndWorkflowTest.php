@@ -40,7 +40,7 @@ class EndToEndWorkflowTest extends TestCase
                         'type' => 'SCRIPT',
                         'name' => 'Noop step',
                         'dependsOn' => [],
-                        'config' => ['operation' => 'noop'],
+                        'config' => ['script' => 'return null;'],
                     ],
                 ],
             ],

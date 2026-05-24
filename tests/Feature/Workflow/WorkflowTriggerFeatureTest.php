@@ -49,7 +49,7 @@ class WorkflowTriggerFeatureTest extends TestCase
                         'type' => 'SCRIPT',
                         'name' => 'Init',
                         'dependsOn' => [],
-                        'config' => ['operation' => 'noop'],
+                        'config' => ['script' => 'return null;'],
                         'retry' => ['maxAttempts' => 1],
                     ],
                 ],

@@ -10,4 +10,5 @@ enum StepType: string
     case DELAY = 'DELAY';
     case CONDITION = 'CONDITION';
     case SCRIPT = 'SCRIPT';
+    case LOG = 'LOG';
 }

@@ -10,6 +10,7 @@ import HttpStepForm from './forms/HttpStepForm.vue'
 import DelayStepForm from './forms/DelayStepForm.vue'
 import ConditionStepForm from './forms/ConditionStepForm.vue'
 import ScriptStepForm from './forms/ScriptStepForm.vue'
+import LogStepForm from './forms/LogStepForm.vue'
 import type { BuilderStep } from './forms/_shared'
 import { simulateStep, type SimulateStepResponse } from '@/services/api/client'
 
@@ -30,11 +31,6 @@ watch(
     () => props.step?.id,
     () => {
         activeTab.value = 'parameters'
-        simulationResult.value = null
-        simulationError.value = null
-        // Don't auto-clear inputDraft — user might want to keep their JSON
-        // around when they click between nodes — but clear computed output.
-        outputDraft.value = ''
     },
 )
 
@@ -52,6 +48,7 @@ const formComponent = computed(() => {
         case 'DELAY': return DelayStepForm
         case 'CONDITION': return ConditionStepForm
         case 'SCRIPT': return ScriptStepForm
+        case 'LOG': return LogStepForm
         default: return null
     }
 })
@@ -63,6 +60,7 @@ const tone = computed(() => {
         case 'SCRIPT': return 'pending' as const
         case 'DELAY': return 'warning' as const
         case 'CONDITION': return 'running' as const
+        case 'LOG': return 'success' as const
     }
     return 'info' as const
 })
@@ -74,6 +72,7 @@ const stepIcon = computed(() => {
         case 'SCRIPT': return 'code'
         case 'DELAY': return 'hourglass_top'
         case 'CONDITION': return 'fork_right'
+        case 'LOG': return 'description'
     }
     return 'tune'
 })
@@ -162,98 +161,214 @@ const displayNoteInFlow = computed({
 })
 
 // ---------------------------------------------------------------------------
-// Simulation: lets the user feed a fake upstream context into a single step
-// and see what it produces, without persisting anything. Backend honors the
-// same handler stack the executor uses, so behavior matches a real run.
+// Inspector simulation state.
+//
+// Two distinct concerns split across the Input and Output tabs:
+//
+//   Input tab  — capture the upstream context. Primary action is
+//                "Execute upstream", which simulates each dependency node in
+//                topological order and shows the accumulated context per
+//                upstream node. An "Edit manually" toggle reveals a raw JSON
+//                editor for advanced users; otherwise the tab stays
+//                read-only.
+//
+//   Output tab — run *this* node against whatever context was captured.
+//                Shows the status badge, duration, error if any, and the
+//                output payload.
+//
+// `upstreamContext` holds the accumulated upstream output (keyed by step id)
+// — same shape that gets passed to the simulator's `input` field.
+// `manualMode` flips the Input tab between the read-only render and the raw
+// JSON editor; `inputDraft` is the editable buffer that backs that editor.
 // ---------------------------------------------------------------------------
 
+const upstreamContext = ref<Record<string, unknown> | null>(null)
+const manualMode = ref(false)
 const inputDraft = ref<string>('')
 const outputDraft = ref<string>('')
-const simulating = ref(false)
-const simulationError = ref<string | null>(null)
-const simulationResult = ref<SimulateStepResponse | null>(null)
+const upstreamRunning = ref(false)
+const stepRunning = ref(false)
+const upstreamError = ref<string | null>(null)
+const stepError = ref<string | null>(null)
+const stepResult = ref<SimulateStepResponse | null>(null)
+
+watch(
+    () => props.step?.id,
+    () => {
+        // Each time the user picks a different node, clear the working state
+        // so we don't accidentally show one node's results on another.
+        upstreamContext.value = null
+        manualMode.value = false
+        inputDraft.value = ''
+        outputDraft.value = ''
+        upstreamError.value = null
+        stepError.value = null
+        stepResult.value = null
+    },
+)
+
+const upstreamEntries = computed<Array<{ id: string; output: unknown }>>(() => {
+    const ctx = upstreamContext.value
+    if (!ctx) return []
+    return Object.entries(ctx).map(([id, output]) => ({ id, output }))
+})
+
+const hasUpstreamContext = computed(() => upstreamContext.value !== null && Object.keys(upstreamContext.value).length > 0)
+
+const stepResultTone = computed(() => {
+    const s = stepResult.value?.status
+    if (!s) return 'info' as const
+    if (s === 'SUCCESS') return 'success' as const
+    if (s === 'SKIPPED') return 'warning' as const
+    return 'failed' as const
+})
 
 /**
- * Build a starter input shape for the inspector by inspecting upstream
- * dependencies. We can't know exactly what an upstream HTTP call returns, so
- * we sketch realistic placeholders the user can edit.
+ * Topologically order this step's transitive upstream graph, simulate each
+ * one in turn, and accumulate their outputs into a context object keyed by
+ * step id. Returns null when something failed so the caller can stop.
  */
-function suggestInput(): Record<string, unknown> {
+async function runUpstreamChain(): Promise<Record<string, unknown> | null> {
     if (!props.step) return {}
-    const out: Record<string, unknown> = {}
-    for (const depId of props.step.dependsOn) {
-        const dep = props.availableSteps.find((s) => s.id === depId)
-        if (!dep) continue
-        switch (dep.type) {
-            case 'HTTP':
-                out[dep.id] = {
-                    status: 200,
-                    body: '{"ok":true}',
-                }
-                break
-            case 'SCRIPT':
-                out[dep.id] = { transformed: true }
-                break
-            case 'DELAY':
-                out[dep.id] = { delayed_ms: 1000 }
-                break
-            case 'CONDITION':
-                out[dep.id] = { evaluated: true }
-                break
-        }
+
+    const byId = new Map(props.availableSteps.map((s) => [s.id, s]))
+    const visited = new Set<string>()
+    const order: BuilderStep[] = []
+    const visit = (id: string) => {
+        const node = byId.get(id)
+        if (!node || visited.has(id)) return
+        visited.add(id)
+        for (const dep of node.dependsOn) visit(dep)
+        order.push(node)
     }
-    return out
-}
+    for (const dep of props.step.dependsOn) visit(dep)
 
-function fillSuggestedInput() {
-    inputDraft.value = JSON.stringify(suggestInput(), null, 2)
-}
-
-async function runSimulation(): Promise<void> {
-    if (!props.step) return
-    simulationError.value = null
-    simulationResult.value = null
-    outputDraft.value = ''
-    simulating.value = true
-
-    let parsedInput: Record<string, unknown> = {}
-    if (inputDraft.value.trim() !== '') {
+    const accumulated: Record<string, unknown> = {}
+    for (const upstream of order) {
         try {
-            const decoded = JSON.parse(inputDraft.value)
-            if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
-                parsedInput = decoded as Record<string, unknown>
-            } else {
-                throw new Error('Input must be a JSON object keyed by step id.')
+            const stepInput: Record<string, unknown> = {}
+            for (const dep of upstream.dependsOn) {
+                if (Object.prototype.hasOwnProperty.call(accumulated, dep)) {
+                    stepInput[dep] = accumulated[dep]
+                }
+            }
+            const result = await simulateStep({
+                type: upstream.type,
+                config: upstream.config ?? {},
+                input: stepInput,
+            })
+            accumulated[upstream.id] = result.output
+            if (result.status === 'FAILED') {
+                upstreamError.value = `Upstream ${upstream.id} failed: ${result.error ?? 'unknown error'}`
+                return null
             }
         } catch (err) {
-            simulationError.value = err instanceof Error ? err.message : 'Invalid JSON input.'
-            simulating.value = false
-            return
+            upstreamError.value = `Upstream ${upstream.id} could not be executed: ${err instanceof Error ? err.message : 'unknown error'}`
+            return null
         }
+    }
+    return accumulated
+}
+
+async function executeUpstream(): Promise<void> {
+    if (!props.step) return
+    upstreamError.value = null
+    upstreamRunning.value = true
+    upstreamContext.value = null
+    try {
+        const ctx = await runUpstreamChain()
+        if (ctx === null) return
+        upstreamContext.value = ctx
+        inputDraft.value = JSON.stringify(ctx, null, 2)
+    } finally {
+        upstreamRunning.value = false
+    }
+}
+
+function enterManualMode() {
+    if (!manualMode.value) {
+        inputDraft.value = upstreamContext.value
+            ? JSON.stringify(upstreamContext.value, null, 2)
+            : '{}'
+    }
+    manualMode.value = true
+}
+
+function exitManualMode() {
+    manualMode.value = false
+    upstreamError.value = null
+    // Keep the manually edited blob persistable as upstreamContext when valid;
+    // otherwise the Output tab will fall back to executing upstream itself.
+    const draft = inputDraft.value.trim()
+    if (draft === '') {
+        upstreamContext.value = null
+        return
+    }
+    try {
+        const decoded = JSON.parse(draft)
+        if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+            upstreamContext.value = decoded as Record<string, unknown>
+        }
+    } catch {
+        // Leave upstreamContext untouched; the output tab will surface the
+        // parse error when the user tries to execute.
+    }
+}
+
+async function executeStep(): Promise<void> {
+    if (!props.step) return
+    stepError.value = null
+    stepResult.value = null
+    outputDraft.value = ''
+    stepRunning.value = true
+
+    let resolvedInput: Record<string, unknown> = {}
+
+    if (manualMode.value) {
+        const draft = inputDraft.value.trim()
+        if (draft !== '') {
+            try {
+                const decoded = JSON.parse(draft)
+                if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+                    resolvedInput = decoded as Record<string, unknown>
+                } else {
+                    throw new Error('Manual input must be a JSON object keyed by step id.')
+                }
+            } catch (err) {
+                stepError.value = err instanceof Error ? err.message : 'Invalid JSON input.'
+                stepRunning.value = false
+                return
+            }
+        }
+    } else if (props.step.dependsOn.length > 0) {
+        // Auto-mode: re-run upstream every time the user clicks Execute so the
+        // captured context matches the latest dependency configuration.
+        if (!upstreamContext.value) {
+            const ctx = await runUpstreamChain()
+            if (ctx === null) {
+                stepRunning.value = false
+                return
+            }
+            upstreamContext.value = ctx
+            inputDraft.value = JSON.stringify(ctx, null, 2)
+        }
+        resolvedInput = upstreamContext.value as Record<string, unknown>
     }
 
     try {
         const result = await simulateStep({
             type: props.step.type,
             config: props.step.config ?? {},
-            input: parsedInput,
+            input: resolvedInput,
         })
-        simulationResult.value = result
+        stepResult.value = result
         outputDraft.value = JSON.stringify(result.output ?? {}, null, 2)
     } catch (err) {
-        simulationError.value = err instanceof Error ? err.message : 'Simulation failed.'
+        stepError.value = err instanceof Error ? err.message : 'Step execution failed.'
     } finally {
-        simulating.value = false
+        stepRunning.value = false
     }
 }
-
-const simulationStatusTone = computed(() => {
-    const s = simulationResult.value?.status
-    if (!s) return 'info' as const
-    if (s === 'SUCCESS') return 'success' as const
-    if (s === 'SKIPPED') return 'warning' as const
-    return 'failed' as const
-})
 </script>
 
 <template>
@@ -266,6 +381,7 @@ const simulationStatusTone = computed(() => {
                         step.type === 'HTTP' ? 'bg-secondary/12 text-secondary' :
                         step.type === 'SCRIPT' ? 'bg-tertiary/12 text-tertiary' :
                         step.type === 'DELAY' ? 'bg-warning/12 text-warning' :
+                        step.type === 'LOG' ? 'bg-success/12 text-success' :
                         'bg-running/12 text-running',
                     ]"
                 >
@@ -287,7 +403,7 @@ const simulationStatusTone = computed(() => {
             <h3 v-else class="text-label-caps font-label-caps text-on-surface-variant uppercase m-0">Node Inspector</h3>
         </header>
 
-        <Tabs v-if="step" v-model="activeTab" :items="tabs" class="px-md pt-sm" />
+        <Tabs v-if="step" v-model="activeTab" :items="tabs" class="step-inspector__tabs px-md pt-sm" />
 
         <div class="step-inspector__body">
             <EmptyState
@@ -341,79 +457,122 @@ const simulationStatusTone = computed(() => {
             </div>
 
             <div v-else-if="activeTab === 'input'" class="flex flex-col gap-md">
-                <div class="flex items-start justify-between gap-sm">
-                    <div class="flex flex-col gap-1 min-w-0">
-                        <h4 class="text-label-caps font-label-caps text-secondary uppercase tracking-wider m-0">Simulated input</h4>
+                <header class="flex flex-col gap-1">
+                    <h4 class="text-label-caps font-label-caps text-secondary uppercase tracking-wider m-0">Upstream input</h4>
+                    <p class="text-body-sm text-on-surface-variant m-0">
+                        Execute the dependency chain to capture the real context this step would receive at runtime.
+                    </p>
+                </header>
+
+                <p
+                    v-if="step.dependsOn.length === 0"
+                    class="rounded-DEFAULT bg-surface-container-low border border-outline-variant/40 p-sm text-body-sm text-on-surface-variant m-0"
+                >
+                    This step has no dependencies — it runs as a root with an empty input.
+                </p>
+
+                <template v-else>
+                    <div class="flex flex-wrap items-center gap-sm">
+                        <Button
+                            leading-icon="play_arrow"
+                            :disabled="upstreamRunning"
+                            @click="executeUpstream"
+                        >{{ upstreamRunning ? 'Executing…' : (hasUpstreamContext ? 'Re-execute upstream' : 'Execute upstream') }}</Button>
+                        <Button
+                            v-if="!manualMode"
+                            size="sm"
+                            variant="ghost"
+                            leading-icon="edit"
+                            :disabled="upstreamRunning"
+                            @click="enterManualMode"
+                        >Edit manually</Button>
+                        <Button
+                            v-else
+                            size="sm"
+                            variant="ghost"
+                            leading-icon="auto_fix_high"
+                            :disabled="upstreamRunning"
+                            @click="exitManualMode"
+                        >Use captured context</Button>
+                    </div>
+
+                    <Alert v-if="upstreamError" tone="error" compact>{{ upstreamError }}</Alert>
+
+                    <!-- Captured upstream output, grouped per node so the user
+                         can see at a glance what each dependency produces. -->
+                    <div
+                        v-if="!manualMode && hasUpstreamContext"
+                        class="flex flex-col gap-sm"
+                    >
+                        <p class="text-label-caps font-label-caps text-on-surface-variant uppercase m-0">Captured per upstream node</p>
+                        <div
+                            v-for="entry in upstreamEntries"
+                            :key="entry.id"
+                            class="rounded-DEFAULT border border-outline-variant/40 bg-surface-container-low/50 overflow-hidden"
+                        >
+                            <header class="flex items-center justify-between gap-sm px-sm py-1.5 border-b border-outline-variant/30 bg-surface-container-low">
+                                <code class="text-code-sm font-code-sm font-bold text-secondary">{{ entry.id }}</code>
+                                <span class="text-body-sm text-on-surface-variant">output</span>
+                            </header>
+                            <pre class="m-0 p-sm text-code-sm font-code-sm text-on-surface overflow-auto max-h-[180px]">{{ JSON.stringify(entry.output, null, 2) }}</pre>
+                        </div>
+                    </div>
+
+                    <p
+                        v-else-if="!manualMode && !hasUpstreamContext"
+                        class="rounded-DEFAULT bg-surface-container-low border border-outline-variant/40 p-sm text-body-sm text-on-surface-variant m-0 text-center"
+                    >
+                        Click <em>Execute upstream</em> to run each dependency and capture its output here.
+                    </p>
+
+                    <!-- Manual JSON editor for advanced users who want to
+                         hand-craft the upstream context. -->
+                    <div v-if="manualMode" class="flex flex-col gap-sm">
+                        <p class="text-label-caps font-label-caps text-on-surface-variant uppercase m-0">Manual JSON override</p>
+                        <textarea
+                            v-model="inputDraft"
+                            rows="10"
+                            class="input-dark rounded-DEFAULT px-sm py-1.5 text-code-sm font-code-sm w-full resize-y"
+                            spellcheck="false"
+                            placeholder='{ "fetch_user": { "status": 200, "json": { "id": 1 } } }'
+                        />
                         <p class="text-body-sm text-on-surface-variant m-0">
-                            Mock the context this step would receive from upstream nodes. Keys should match dependency step ids.
+                            Object keyed by dependency step id. Click <em>Use captured context</em> to commit this and switch back to the read-only view.
                         </p>
                     </div>
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        leading-icon="auto_fix_high"
-                        :disabled="step.dependsOn.length === 0"
-                        @click="fillSuggestedInput"
-                    >Suggest</Button>
-                </div>
-                <textarea
-                    v-model="inputDraft"
-                    rows="10"
-                    class="input-dark rounded-DEFAULT px-sm py-1.5 text-code-sm font-code-sm w-full resize-y"
-                    spellcheck="false"
-                    :placeholder="step.dependsOn.length > 0
-                        ? '{\n  &quot;' + step.dependsOn[0] + '&quot;: { &quot;status&quot;: 200, &quot;body&quot;: &quot;{\\&quot;ok\\&quot;:true}&quot; }\n}'
-                        : '{}'"
-                />
-                <p v-if="step.dependsOn.length === 0" class="text-body-sm text-on-surface-variant m-0">
-                    This step has no dependencies — leave the input empty to simulate a root step.
-                </p>
-                <div class="flex items-center gap-sm">
-                    <Button
-                        leading-icon="play_arrow"
-                        :disabled="simulating"
-                        @click="runSimulation"
-                    >{{ simulating ? 'Simulating…' : 'Simulate with this input' }}</Button>
-                    <span v-if="simulationResult" class="text-body-sm text-on-surface-variant">
-                        Last run · {{ simulationResult.duration_ms }}ms · status
-                        <code class="font-code-sm text-on-surface">{{ simulationResult.status }}</code>
-                    </span>
-                </div>
-                <Alert v-if="simulationError" tone="error" compact>{{ simulationError }}</Alert>
+                </template>
             </div>
 
             <div v-else-if="activeTab === 'output'" class="flex flex-col gap-md">
-                <div class="flex items-start justify-between gap-sm">
+                <header class="flex items-start justify-between gap-sm">
                     <div class="flex flex-col gap-1 min-w-0">
-                        <h4 class="text-label-caps font-label-caps text-secondary uppercase tracking-wider m-0">Simulated output</h4>
+                        <h4 class="text-label-caps font-label-caps text-secondary uppercase tracking-wider m-0">Step output</h4>
                         <p class="text-body-sm text-on-surface-variant m-0">
-                            Run this step in isolation. The output below is exactly what downstream nodes would see in their context.
+                            Run this node against the upstream context captured in the Input tab. This is exactly what downstream nodes would see.
                         </p>
                     </div>
-                    <Badge v-if="simulationResult" :tone="simulationStatusTone">{{ simulationResult.status }}</Badge>
-                </div>
+                    <div v-if="stepResult" class="flex items-center gap-sm shrink-0">
+                        <Badge :tone="stepResultTone">{{ stepResult.status }}</Badge>
+                        <span class="text-body-sm text-on-surface-variant">{{ stepResult.duration_ms }}ms</span>
+                    </div>
+                </header>
 
-                <div class="flex items-center gap-sm flex-wrap">
-                    <Button
-                        leading-icon="play_arrow"
-                        :disabled="simulating"
-                        @click="runSimulation"
-                    >{{ simulating ? 'Simulating…' : (simulationResult ? 'Re-run simulation' : 'Run simulation') }}</Button>
-                    <span v-if="simulationResult" class="text-body-sm text-on-surface-variant">
-                        {{ simulationResult.duration_ms }}ms
-                    </span>
-                </div>
+                <Button
+                    leading-icon="bolt"
+                    :disabled="stepRunning"
+                    @click="executeStep"
+                >{{ stepRunning ? 'Executing…' : (stepResult ? 'Re-execute this step' : 'Execute this step') }}</Button>
 
-                <Alert v-if="simulationError" tone="error" compact>{{ simulationError }}</Alert>
+                <Alert v-if="stepError" tone="error" compact>{{ stepError }}</Alert>
 
-                <div v-if="simulationResult?.error" class="rounded-DEFAULT border border-failed/40 bg-failed/8 p-sm flex flex-col gap-1">
+                <div v-if="stepResult?.error" class="rounded-DEFAULT border border-failed/40 bg-failed/8 p-sm flex flex-col gap-1">
                     <p class="text-label-caps font-label-caps text-failed uppercase m-0">Error</p>
-                    <p class="m-0 text-body-sm text-on-surface">{{ simulationResult.error }}</p>
+                    <p class="m-0 text-body-sm text-on-surface">{{ stepResult.error }}</p>
                 </div>
 
                 <div class="flex flex-col gap-1">
                     <p class="text-label-caps font-label-caps text-on-surface-variant uppercase m-0">Output payload</p>
-                    <pre class="m-0 p-sm rounded-DEFAULT bg-[#02080f] border border-outline-variant/30 text-code-sm font-code-sm text-on-surface overflow-auto max-h-[320px]">{{ outputDraft || '// Click "Run simulation" to see the output' }}</pre>
+                    <pre class="m-0 p-sm rounded-DEFAULT bg-[#02080f] border border-outline-variant/30 text-code-sm font-code-sm text-on-surface overflow-auto max-h-[320px]">{{ outputDraft || '// Click "Execute this step" to see the output' }}</pre>
                 </div>
             </div>
 
@@ -515,6 +674,7 @@ const simulationStatusTone = computed(() => {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
     background: var(--color-surface-container);
     border: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
     border-radius: var(--radius-xl);
@@ -528,12 +688,23 @@ const simulationStatusTone = computed(() => {
     padding: 12px 16px;
     border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 40%, transparent);
     background: var(--color-surface-container-high);
+    flex-shrink: 0;
+}
+
+.step-inspector__tabs {
+    flex-shrink: 0;
+    background: var(--color-surface-container);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-outline-variant) 25%, transparent);
 }
 
 .step-inspector__body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 16px;
+    /* Prevent layout shift when long output appears in Output tab */
+    overscroll-behavior: contain;
 }
 
 .toggle {

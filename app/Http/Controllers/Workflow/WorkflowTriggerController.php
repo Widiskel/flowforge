@@ -22,11 +22,18 @@ class WorkflowTriggerController extends Controller
 
         $this->authorize('view', $model);
 
+        $perPage = (int) $request->integer('per_page', 15);
+
+        validator(
+            ['per_page' => $perPage],
+            ['per_page' => ['integer', 'min:1', 'max:100']],
+        )->validate();
+
         $triggers = WorkflowTrigger::query()
             ->where('tenant_id', $request->user()->tenant_id)
             ->where('workflow_id', $model->id)
             ->latest()
-            ->get();
+            ->paginate($perPage);
 
         return WorkflowTriggerResource::collection($triggers);
     }

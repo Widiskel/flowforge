@@ -29,8 +29,8 @@ class WorkflowExecutorTest extends TestCase
             'name' => 'Test',
             'globalTimeoutMs' => 60000,
             'steps' => [
-                ['id' => 'a', 'type' => 'SCRIPT', 'dependsOn' => [], 'config' => ['operation' => 'noop'], 'retry' => ['maxAttempts' => 1]],
-                ['id' => 'b', 'type' => 'SCRIPT', 'dependsOn' => ['a'], 'config' => ['operation' => 'noop'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'a', 'type' => 'SCRIPT', 'dependsOn' => [], 'config' => ['script' => 'return null;'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'b', 'type' => 'SCRIPT', 'dependsOn' => ['a'], 'config' => ['script' => 'return null;'], 'retry' => ['maxAttempts' => 1]],
             ],
         ]);
 
@@ -47,7 +47,7 @@ class WorkflowExecutorTest extends TestCase
         {
             public function handle(array $config, array $context): StepResult
             {
-                if (($config['operation'] ?? '') === 'fail_demo') {
+                if (str_contains((string) ($config['script'] ?? ''), 'fail')) {
                     return new StepResult(StepRunStatus::FAILED, [], 'Intentional failure.');
                 }
 
@@ -60,9 +60,9 @@ class WorkflowExecutorTest extends TestCase
             'name' => 'Fail Test',
             'globalTimeoutMs' => 60000,
             'steps' => [
-                ['id' => 'ok', 'type' => 'SCRIPT', 'dependsOn' => [], 'config' => ['operation' => 'noop'], 'retry' => ['maxAttempts' => 1]],
-                ['id' => 'bad', 'type' => 'SCRIPT', 'dependsOn' => ['ok'], 'config' => ['operation' => 'fail_demo'], 'retry' => ['maxAttempts' => 1]],
-                ['id' => 'never', 'type' => 'SCRIPT', 'dependsOn' => ['bad'], 'config' => ['operation' => 'noop'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'ok', 'type' => 'SCRIPT', 'dependsOn' => [], 'config' => ['script' => 'return null;'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'bad', 'type' => 'SCRIPT', 'dependsOn' => ['ok'], 'config' => ['script' => 'fail'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'never', 'type' => 'SCRIPT', 'dependsOn' => ['bad'], 'config' => ['script' => 'return null;'], 'retry' => ['maxAttempts' => 1]],
             ],
         ]);
 
@@ -119,7 +119,7 @@ class WorkflowExecutorTest extends TestCase
             'globalTimeoutMs' => 60000,
             'steps' => [
                 ['id' => 'check', 'type' => 'CONDITION', 'dependsOn' => [], 'config' => ['field' => 'missing', 'operator' => 'equals', 'value' => 'x'], 'retry' => ['maxAttempts' => 1]],
-                ['id' => 'after', 'type' => 'SCRIPT', 'dependsOn' => ['check'], 'config' => ['operation' => 'noop'], 'retry' => ['maxAttempts' => 1]],
+                ['id' => 'after', 'type' => 'SCRIPT', 'dependsOn' => ['check'], 'config' => ['script' => 'return null;'], 'retry' => ['maxAttempts' => 1]],
             ],
         ]);
 

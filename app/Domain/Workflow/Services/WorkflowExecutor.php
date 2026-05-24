@@ -9,6 +9,7 @@ use App\Domain\Workflow\Enums\StepRunStatus;
 use App\Domain\Workflow\Handlers\ConditionStepHandler;
 use App\Domain\Workflow\Handlers\DelayStepHandler;
 use App\Domain\Workflow\Handlers\HttpStepHandler;
+use App\Domain\Workflow\Handlers\LogStepHandler;
 use App\Domain\Workflow\Handlers\ScriptStepHandler;
 use App\Domain\Workflow\Handlers\StepHandler;
 use App\Domain\Workflow\Handlers\StepResult;
@@ -24,6 +25,7 @@ class WorkflowExecutor
             'DELAY' => new DelayStepHandler,
             'CONDITION' => new ConditionStepHandler,
             'SCRIPT' => new ScriptStepHandler,
+            'LOG' => new LogStepHandler,
         ];
     }
 
@@ -105,16 +107,20 @@ class WorkflowExecutor
         $backoff = $step['retry']['backoff'] ?? 'exponential';
 
         $lastResult = null;
+        $stepStartedAt = microtime(true);
 
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             $lastResult = $handler->handle($step['config'] ?? [], $context);
 
             if ($lastResult->status !== StepRunStatus::FAILED || $attempt >= $maxAttempts) {
+                $durationMs = (int) ((microtime(true) - $stepStartedAt) * 1000);
+
                 return new StepResult(
                     $lastResult->status,
                     $lastResult->output,
                     $lastResult->error,
                     $attempt,
+                    $durationMs,
                 );
             }
 
