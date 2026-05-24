@@ -1,6 +1,54 @@
 # FlowForge
 
-FlowForge adalah Real-Time Multi-Tenant Workflow Orchestration Engine — versi sederhana gabungan Zapier workflow engine dan GitHub Actions execution model. Project ini dibangun sebagai submission technical test SEVIMA untuk posisi Software Engineer.
+<p align="center">
+  <img src="public/images/flowforge-logo.jpg" alt="FlowForge logo" width="160" />
+</p>
+
+<p align="center">
+  <strong>Real-Time Multi-Tenant Workflow Orchestration Engine</strong><br/>
+  Workflow authoring, live execution monitoring, tenant-scoped operations, and AI-assisted failure analysis in one Laravel + Vue application.
+</p>
+
+FlowForge adalah submission technical test SEVIMA untuk posisi Software Engineer. Product framing-nya sengaja dibuat seperti workflow automation platform ringan: ada workflow catalog, visual orchestration builder, manual/scheduled/webhook trigger, run monitoring, log inspection, health metrics, dan intelligent failure analysis untuk run yang gagal.
+
+## Product highlights
+
+- Multi-tenant workflow orchestration dengan JWT bearer auth + refresh token rotation.
+- Workflow builder yang tersambung ke backend nyata: create workflow, inspect node graph, trigger run, lihat output/log, dan kelola trigger.
+- Queue-based execution flow untuk menghindari deadlock saat HTTP step memanggil endpoint internal.
+- AI failure analysis mock-first yang deterministic, reproducible, dan aman untuk demo tanpa API key.
+- Operations surface yang jelas dipisah antara business metrics dan readiness/liveness probes.
+
+## Screenshots
+
+<p align="center">
+  <strong>Login & Authentication</strong><br/>
+  <img src="public/images/readme-login.jpg" alt="FlowForge Login" width="800" />
+</p>
+
+<p align="center">
+  <strong>Dashboard — Mission Control</strong><br/>
+  Real-time telemetry, throughput chart, and recent runs summary.<br/>
+  <img src="public/images/readme-dashboard.jpg" alt="FlowForge Dashboard" width="800" />
+</p>
+
+<p align="center">
+  <strong>Workflow Catalog</strong><br/>
+  List, search, filter, trigger, view, edit, delete workflows.<br/>
+  <img src="public/images/readme-workflows.jpg" alt="FlowForge Workflows" width="800" />
+</p>
+
+<p align="center">
+  <strong>Orchestration Builder (View Mode)</strong><br/>
+  Visual DAG preview dengan Vue Flow, step metadata, dan mini-map.<br/>
+  <img src="public/images/readme-workflow-detail.jpg" alt="FlowForge Builder" width="800" />
+</p>
+
+<p align="center">
+  <strong>Execution History</strong><br/>
+  Run list, detailed execution path, logs, dan AI failure analysis button.<br/>
+  <img src="public/images/readme-runs.jpg" alt="FlowForge Runs" width="800" />
+</p>
 
 ## Stack
 
@@ -132,7 +180,7 @@ Operational probes (public, untuk K8s/load balancer):
 ./vendor/bin/pint --test     # Lint check
 npm run typecheck            # TypeScript check
 npm run build                # Frontend build
-php artisan test             # Test suite (99 tests, 284 assertions)
+php artisan test             # Test suite (124 tests, 367 assertions)
 ```
 
 ## Query optimization
